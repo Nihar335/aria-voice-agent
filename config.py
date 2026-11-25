@@ -24,11 +24,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
 # --- Which LLM to try first ("gemini" or "groq") ---
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").strip().lower()
 
-# --- Model names ---
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+# --- Model names (comma-separated = backups, tried in order) ---
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite,gemini-3.8-flash,gemini-flash-latest")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b,openai/gpt-oss-120b,openai/gpt-oss-20b")
 GEMINI_EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001")
 
 # --- Folders ---

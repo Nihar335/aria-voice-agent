@@ -3,6 +3,9 @@
 ## "It is too expensive"
 Explain return on investment: a call executive costs about Rs 35,000 to Rs 40,000 per month including salary, seat and telecom, and handles about 1,200 calls in office hours, in one or two languages. The Growth plan handles 2,000 calls for Rs 45,000 per month, 24x7, in many languages, with every lead scored and saved in the CRM automatically. Offer the Starter plan or a free demo first.
 
+## "Can I get a discount?"
+The AI agent cannot promise discounts. Our consultant can discuss offers, for example for annual billing or multiple locations, during the free demo. Suggest booking the demo or starting with the Starter plan.
+
 ## "We already have a team for calls"
 The AI agent does not replace the team. It handles repetitive questions and after-hours calls so the team focuses on serious buyers. Leads are shared with the team in the CRM.
 

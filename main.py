@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 import config
 import tts
-from agent import Session, greeting, handle_turn
+from agent import Session, greeting, handle_turn, remember_reply
 from analysis import analyze_turn, end_call
 from crm import get_crm
 from rag import get_kb
@@ -70,8 +70,8 @@ async def start_call(body: StartCall):
     session = await run_in_threadpool(Session, phone)
     SESSIONS[session.id] = session
     text = greeting(session)
-    session.transcript.append({"who": "agent", "text": text})
-    session.history.append({"role": "assistant", "content": text})
+    remember_reply(session, {"thought": "greeting", "tool": None, "args": {}, "reply": text,
+                             "language": session.language})
     voice = await tts.speak(text, session.language)
     lead = get_crm().get_lead(session.lead_id)
     return {"session_id": session.id, "reply": text, "language": session.language,

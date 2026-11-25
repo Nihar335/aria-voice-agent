@@ -99,13 +99,19 @@ def analyze_turn(session) -> dict:
     convo = "\n".join(f"{t['who'].upper()}: {t['text']}" for t in session.transcript[-12:])
     prev = session.analysis or {}
     try:
-        data, result = llm.chat_json(TURN_PROMPT, [{"role": "user", "content": convo}], temperature=0.1)
+        data, result = llm.chat_json(TURN_PROMPT, [{"role": "user", "content": convo}], temperature=0.1,
+                                     prefer="gemini")
         data["analysis_ms"] = result.latency_ms
     except Exception as e:
         print(f"[analysis] LLM failed, using keyword sentiment. Reason: {e}")
         last = session.transcript[-2]["text"] if len(session.transcript) >= 2 else ""
         label, score = _fallback_sentiment(last)
         data = {**prev, "sentiment": label, "sentiment_score": score}
+
+    # Clean "null"-like words the LLM may return, so the cockpit shows "—" instead.
+    for item in (data.get("bant") or {}).values():
+        if isinstance(item, dict) and str(item.get("value")).strip().lower() in ("null", "none", "unknown", "n/a", ""):
+            item["value"] = None
 
     crm = get_crm()
     demo_booked = crm.get_lead(session.lead_id)["status"] == "demo_booked"
@@ -162,7 +168,8 @@ def end_call(session) -> dict:
         summary = {"summary": "Call ended before the customer spoke.", "outcome": "not_interested"}
     else:
         try:
-            summary, _ = llm.chat_json(SUMMARY_PROMPT, [{"role": "user", "content": convo}], temperature=0.2)
+            summary, _ = llm.chat_json(SUMMARY_PROMPT, [{"role": "user", "content": convo}], temperature=0.2,
+                                     prefer="gemini")
         except Exception as e:
             print(f"[analysis] Summary failed. Reason: {e}")
             summary = {"summary": "Automatic summary unavailable. See transcript.", "outcome": "needs_follow_up"}

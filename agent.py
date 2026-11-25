@@ -29,6 +29,25 @@ from tools import IST, TOOL_DESCRIPTIONS, run_tool
 
 MAX_TOOL_STEPS = 3
 
+# Words that mean "the thing we were just talking about" -> the question is a follow-up.
+FOLLOW_UP_WORDS = {"this", "that", "it", "these", "those", "them", "iska", "iski", "iske",
+                   "yeh", "ye", "woh", "wo", "uska", "uski", "isme", "isko"}
+
+
+def rag_query(session, user_text: str) -> str:
+    """Add the previous customer message to short follow-up questions, so search has context."""
+    words = set(user_text.lower().replace("?", " ").replace(",", " ").split())
+    earlier = [t["text"] for t in session.transcript[:-1] if t["who"] == "customer"]
+    if earlier and words & FOLLOW_UP_WORDS:
+        return earlier[-1] + " " + user_text
+    return user_text
+
+
+def remember_reply(session, decision: dict):
+    """Store the agent's answer in the history AS JSON, so the LLM keeps answering in JSON."""
+    session.history.append({"role": "assistant", "content": json.dumps(decision, ensure_ascii=False)})
+    session.transcript.append({"who": "agent", "text": decision["reply"]})
+
 SYSTEM_PROMPT = """You are "Aria", a friendly and smart sales voice agent for Fortivex AI, an AI and software company in Bengaluru.
 You are on a LIVE PHONE CALL. Today is {today} (IST).
 
@@ -36,12 +55,14 @@ YOUR GOALS (in this order):
 1. Understand the customer's business and problem. Ask ONE question at a time.
 2. Answer questions ONLY using the COMPANY FACTS below. If the facts do not contain the answer, say you will confirm with the team. NEVER invent prices, features or promises.
 3. Qualify the lead naturally (BANT): Budget, Authority (are they the decision maker?), Need, Timeline.
-4. Get their name (and email if they agree), then offer a FREE 30-minute demo and book it.
+4. Get their name, then offer a FREE 30-minute demo. As soon as the customer agrees to a time that is in the free slots, call book_appointment IMMEDIATELY (email is optional - ask for it after booking). Never say a demo is booked unless book_appointment returned "booked": true.
 5. If the customer asks for a human, is angry, or the question is outside the facts, use handoff_to_human.
+6. If the customer asks something unrelated to Fortivex or their business (general knowledge, jokes, etc.), do NOT answer it. Say politely that you can only help with Fortivex services, then steer back.
 
 VOICE RULES:
-- Short replies: 1 to 3 sentences. No lists, no markdown, no emojis. It will be spoken aloud.
-- Say prices naturally, e.g. "twenty-five thousand rupees".
+- Keep every reply SHORT: at most 2 sentences and under 35 words. No lists, no markdown, no emojis. It will be spoken aloud.
+- Say dates and times naturally, e.g. "tomorrow at 3 PM" or "Thursday at 11 AM", never "2026-11-26 15:00".
+- Say prices naturally, e.g. "twenty-five thousand rupees". "24x7" means twenty-four hours, seven days a week.
 - Always say prices are indicative and confirmed by a consultant.
 
 LANGUAGE RULES:
@@ -58,7 +79,7 @@ LANGUAGE DETECTED FROM THE CUSTOMER'S LAST MESSAGE: {detected}
 COMPANY FACTS (retrieved for this question):
 {context}
 
-RESPOND ONLY WITH JSON in exactly this shape:
+RESPOND ONLY WITH JSON in exactly this shape (every single time, never plain text):
 {{"thought": "one short line: what you are doing and why",
   "tool": null or "tool_name",
   "args": {{}},
@@ -96,10 +117,12 @@ class Session:
         if not self.previous:
             return ""
         lead = get_crm().get_lead(self.lead_id)
+        demos = [a["start"] for a in get_crm().list_appointments() if a["lead_id"] == self.lead_id]
         return (
             "\nRETURNING CUSTOMER - you spoke before. Greet them by name and refer to the last call naturally.\n"
             f"Name: {lead.get('name') or 'unknown'}. Last call ({self.previous['date'][:10]}): "
             f"{self.previous.get('summary', '')}\n"
+            f"Demos already booked (IST): {', '.join(demos) if demos else 'none'}\n"
         )
 
 
@@ -121,7 +144,7 @@ def handle_turn(session: Session, user_text: str) -> dict:
 
     # 1. RAG on every turn: cheaper and faster than waiting for the LLM to ask for it.
     t_rag = time.perf_counter()
-    hits = get_kb().search(user_text)
+    hits = get_kb().search(rag_query(session, user_text))
     rag_ms = int((time.perf_counter() - t_rag) * 1000)
     session.sources = [h["source"] for h in hits]
     session.events.append({"type": "rag", "detail": f"{len(hits)} facts found", "ms": rag_ms,
@@ -158,8 +181,8 @@ def handle_turn(session: Session, user_text: str) -> dict:
         break
 
     session.language = language
-    session.history.append({"role": "assistant", "content": reply})
-    session.transcript.append({"who": "agent", "text": reply})
+    remember_reply(session, {"thought": thoughts[-1] if thoughts else "", "tool": None, "args": {},
+                             "reply": reply, "language": language})
 
     return {
         "reply": reply,

@@ -14,7 +14,7 @@ A voice sales agent that talks to customers in **English, Hindi, Hinglish, Kanna
 | 📅 Appointment booking (validated slots + Google Calendar) & CRM adapter | `tools.py`, `crm.py` |
 | 📝 Call summary, next steps & insights dashboard | `analysis.py`, `frontend/index.html` |
 | ⚡ Live cockpit: agent thoughts, tool calls, sources, latency per stage | `frontend/index.html` |
-| 🙋 Human handoff, 🔁 LLM fallback (Gemini → Groq) | `tools.py`, `llm.py` |
+| 🙋 Human handoff, 🔁 LLM fallback chain (Groq ⇄ Gemini, 5 models) | `tools.py`, `llm.py` |
 
 ## Quick start (Windows)
 Requirements: Python 3.11+, Google Chrome, free API keys from [Google AI Studio](https://aistudio.google.com/apikey) and [Groq](https://console.groq.com/keys).
@@ -56,8 +56,9 @@ docs/            Architecture, scaling, security, costs
 | Variable | Meaning |
 |---|---|
 | `GEMINI_API_KEY`, `GROQ_API_KEY` | LLM keys (at least one) |
-| `LLM_PROVIDER` | `gemini` or `groq`: which to try first; the other is the automatic backup |
-| `GEMINI_MODEL`, `GROQ_MODEL`, `GEMINI_EMBED_MODEL` | Change models without code changes |
+| `LLM_PROVIDER` | `groq` or `gemini`: which to try first; the other is the backup |
+| `GROQ_MODEL`, `GEMINI_MODEL` | Comma-separated model lists, tried in order (each model has its own rate limit) |
+| `GEMINI_EMBED_MODEL` | Embedding model for RAG |
 
 Each module can be tested alone: `python llm.py`, `python rag.py`, `python analysis.py`, `python tts.py`, and `python agent.py` (text chat in the terminal).
 

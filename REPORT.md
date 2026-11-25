@@ -1,6 +1,6 @@
 # Aria: Autonomous AI Sales Voice Agent (1-page report)
 
-**Author:** Nihar · **Built for:** Fortivex AI Pvt Ltd assignment · **Stack:** Python, FastAPI, Gemini + Groq, RAG, edge-tts, SQLite, vanilla JS
+**Author:** Nihar · **Built for:** Fortivex AI Pvt Ltd assignment · **Stack:** Python, FastAPI, Groq (Qwen, GPT-OSS) + Gemini, RAG, edge-tts, SQLite, vanilla JS
 
 **Business problem.** Indian SMBs (clinics, real estate, education, services) miss a large share of inbound enquiries: calls after hours, at peak times, or in a language the executive does not speak. Leads that do get answered are qualified inconsistently and rarely logged in a CRM with notes. Every missed or poorly handled call is lost revenue.
 
@@ -16,7 +16,7 @@
 | Appointment booking + CRM | Agentic tool loop: `check_availability` → `book_appointment` (slot validated by code) → Google Calendar link; CRM behind an **adapter** (SQLite today, Fortivex CRM = one class) |
 | Call summary + insights | End-of-call summary, outcome, objections, next steps; live cockpit (agent reasoning, tools, sources, latency) and insights dashboard |
 
-**Architecture.** Browser ↔ FastAPI ↔ Agent (think → act → observe, max 3 tools) ↔ RAG / Tools / LLM gateway (Gemini → Groq automatic fallback) ↔ CRM adapter. Diagrams and the full end-to-end sequence: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+**Architecture.** Browser ↔ FastAPI ↔ Agent (think → act → observe, max 3 tools) ↔ RAG / Tools / LLM gateway (automatic fallback across 5 models on Groq + Gemini) ↔ CRM adapter. Diagrams and the full end-to-end sequence: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 **Technical feasibility.** Every external dependency sits behind one swappable module (`llm.py`, `crm.py`, `tts.py`), and every layer has a fallback, so a live call never goes silent. The LLM *suggests*, code *decides*: tools validate arguments, and the lead score is deterministic. Production path: telephony media streams (Exotel/Twilio), streaming STT/TTS, Redis sessions, PostgreSQL + pgvector, worker queue. The agent logic stays unchanged.
 

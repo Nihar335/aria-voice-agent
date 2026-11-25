@@ -32,7 +32,7 @@ Formula: `concurrent = calls_per_hour × call_minutes / 60`. **Scenario A runs o
 **Reliability, already in the MVP and kept in production:**
 | Failure | What happens |
 |---|---|
-| Main LLM down / rate-limited | `llm.py` retries on the backup provider in the same request |
+| Main LLM down / rate-limited | `llm.py` fails fast (no silent retry) and moves to the next of 5 models across Groq + Gemini in the same request |
 | Embeddings API down | `rag.py` switches to keyword search |
 | Neural TTS down | Browser / secondary TTS voice |
 | All LLMs down | Polite apology + lead flagged `needs_human` in CRM |

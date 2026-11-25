@@ -20,6 +20,9 @@ import json
 import math
 import re
 from collections import Counter
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 
 import numpy as np
 
@@ -62,13 +65,51 @@ def load_chunks() -> list[dict]:
 # ---------------------------------------------------------------------------
 # Step 2: EMBED  (Gemini embeddings, with a free offline backup)
 # ---------------------------------------------------------------------------
+_client = None
+_pool = ThreadPoolExecutor(max_workers=4)
+QUERY_TIME_LIMIT = 1.2   # seconds we are willing to wait for a query embedding on a live call
+
+
+_cache: dict[str, np.ndarray] = {}   # question -> vector (same question again = 0 ms)
+_slow_until = 0.0                     # "circuit breaker": skip embeddings until this time
+
+
+def _embed_query(question: str) -> np.ndarray:
+    """
+    Embed the customer's question, but never keep a live call waiting:
+      - already seen this question?  -> use the saved vector (0 ms)
+      - embeddings were slow recently? -> skip them for 60 s (circuit breaker)
+      - otherwise wait at most QUERY_TIME_LIMIT seconds, else give up (keyword search is used)
+    A slow answer that arrives late is still saved, so the next identical question is instant.
+    """
+    global _slow_until
+    if question in _cache:
+        return _cache[question]
+    if time.time() < _slow_until:
+        raise TimeoutError("embeddings were slow recently - using keyword search for now")
+
+    def save(job):
+        if job.exception() is None:
+            _cache[question] = job.result()[0]
+
+    job = _pool.submit(_gemini_embed, [question], "RETRIEVAL_QUERY")
+    job.add_done_callback(save)
+    try:
+        return job.result(timeout=QUERY_TIME_LIMIT)[0]
+    except FutureTimeout:
+        _slow_until = time.time() + 60      # open the circuit for one minute
+        raise TimeoutError(f"embedding slower than {QUERY_TIME_LIMIT}s")
+
+
 def _gemini_embed(texts: list[str], task: str) -> np.ndarray:
     """Ask Gemini to turn texts into meaning-vectors."""
     from google import genai
     from google.genai import types
 
-    client = genai.Client(api_key=config.GEMINI_API_KEY)
-    result = client.models.embed_content(
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=config.GEMINI_API_KEY)   # create once, reuse (faster)
+    result = _client.models.embed_content(
         model=config.GEMINI_EMBED_MODEL,
         contents=texts,
         # DOCUMENT for stored pieces, QUERY for the customer's question.
@@ -153,11 +194,12 @@ class KnowledgeBase:
         """Return the k most relevant pieces, each with its source and score."""
         if self.mode == "embeddings":
             try:
-                q = _gemini_embed([question], "RETRIEVAL_QUERY")[0]
+                q = _embed_query(question)
                 scores = self.vectors @ q          # cosine similarity with every chunk at once
                 min_score = MIN_SCORE_EMBED
             except Exception as e:
-                print(f"[rag] Query embedding failed, keyword backup. Reason: {e}")
+                # Too slow or failed -> instant keyword search, so the caller is not kept waiting.
+                print(f"[rag] Query embedding failed/slow, keyword backup. Reason: {e!r}")
                 scores, min_score = np.array(self.keyword.scores(question)), MIN_SCORE_KEYWORD
         else:
             scores, min_score = np.array(self.keyword.scores(question)), MIN_SCORE_KEYWORD

@@ -17,14 +17,14 @@ flowchart LR
         TOOLS["Tools - tools.py<br/>save_lead_info · check_availability<br/>book_appointment · handoff_to_human<br/>search_knowledge"]
         ANALYSIS["Analysis - analysis.py<br/>language · sentiment · BANT score<br/>call summary (background)"]
         TTS["TTS - tts.py<br/>edge-tts neural voices"]
-        LLM["LLM gateway - llm.py<br/>Gemini → Groq fallback<br/>JSON mode + latency"]
+        LLM["LLM gateway - llm.py<br/>5-model fallback chain<br/>fail-fast on rate limits<br/>JSON mode + latency"]
         CRM["CRM adapter - crm.py<br/>SQLiteCRM (today)<br/>FortivexCRMAdapter (plug-in)"]
     end
 
     KB[("knowledge_base/*.md<br/>services · pricing · FAQ · objections")]
     DB[("SQLite<br/>leads · calls · appointments")]
-    GEM["Google Gemini API<br/>chat + embeddings"]
-    GROQ["Groq API<br/>Llama 3.3 70B"]
+    GEM["Google Gemini API<br/>chat backup + embeddings"]
+    GROQ["Groq API (primary)<br/>Qwen 3.8 · GPT-OSS 120B/20B"]
     MSV["Microsoft neural voices"]
     GCAL["Google Calendar<br/>pre-filled event link"]
 
@@ -37,8 +37,8 @@ flowchart LR
     TOOLS --> GCAL
     AGENT --> LLM
     ANALYSIS --> LLM
-    LLM --> GEM
-    LLM -.->|fallback| GROQ
+    LLM --> GROQ
+    LLM -.->|fallback| GEM
     RAG -.->|embeddings| GEM
     API --> TTS
     TTS --> MSV
@@ -53,7 +53,7 @@ flowchart LR
 | Principle | Where |
 |---|---|
 | **One gateway per external dependency** so it can be swapped | `llm.py` (LLM), `crm.py` (CRM), `tts.py` (voice) |
-| **Fallback at every layer**, so a live call never dies | Gemini → Groq · embeddings → keyword search · neural voice → browser voice · LLM down → human handoff |
+| **Fallback at every layer**, so a live call never dies | Groq ⇄ Gemini model chain · slow embeddings → keyword search (circuit breaker) · neural voice → browser voice · LLM down → human handoff |
 | **LLM suggests, code decides** | tools validate every argument; lead score is a formula, not an LLM guess |
 | **Grounded answers only** | RAG with a minimum-similarity threshold; sources shown for every answer |
 | **Nothing slow on the customer's path** | analysis and scoring run as background tasks after the reply is sent |

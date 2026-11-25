@@ -93,7 +93,9 @@ class SQLiteCRM(CRMAdapter):
 
     def update_lead(self, lead_id, fields):
         # Only allow known columns (protects against bad data from the LLM).
-        clean = {k: v for k, v in fields.items() if k in LEAD_FIELDS and v not in (None, "")}
+        # The LLM sometimes writes the WORD "null" or "unknown" instead of leaving a field empty.
+        empty = (None, "", "null", "None", "none", "unknown", "n/a")
+        clean = {k: v for k, v in fields.items() if k in LEAD_FIELDS and v not in empty}
         if clean:
             # "?" placeholders = values are never pasted into SQL text (no SQL injection).
             sets = ", ".join(f"{k} = ?" for k in clean)
