@@ -44,6 +44,9 @@ INTERNAL_KNOWLEDGE_DIR.mkdir(exist_ok=True)
 # --- Admin login for /admin.html (empty = admin page disabled) ---
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 
+# --- Largest document the admin page accepts (MB). PDFs are stored as their extracted text. ---
+MAX_UPLOAD_MB = max(1, int(os.getenv("MAX_UPLOAD_MB", "50")))
+
 # ===========================================================================
 # The 7-layer stack (see layers/__init__.py). Every setting has a safe default.
 # ===========================================================================

@@ -148,6 +148,15 @@ class ReplyLanguage(unittest.TestCase):
         self.assertEqual(reply_language("ok, book it", "hinglish"), "hinglish")
 
 
+class CustomerTranslation(unittest.TestCase):
+    def test_tool_result_is_never_shown_as_customer_words(self):
+        from layers.pipeline import clean_customer_en
+        said = "Hi, I'm Kavya. How much does it cost?"
+        self.assertEqual(clean_customer_en('[TOOL RESULT for save_lead_info] {"saved": true}', said), said)
+        self.assertEqual(clean_customer_en(None, said), said)
+        self.assertEqual(clean_customer_en("Is it expensive?", "Mehenga hai kya?"), "Is it expensive?")
+
+
 class KeywordSearch(unittest.TestCase):
     def test_cost_question_finds_pricing(self):
         """The keyword backup (used when embeddings are slow) must still find prices."""

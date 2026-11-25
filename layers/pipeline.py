@@ -56,6 +56,15 @@ def _result(session, reply, language, reply_en, customer_en, provider, thoughts,
     }
 
 
+def clean_customer_en(candidate, customer_text: str) -> str:
+    """The model's English version of what the customer said, unless it is really a tool result /
+    system marker (that must never be shown as the customer's words)."""
+    c = (candidate or "").strip() if isinstance(candidate, str) else ""
+    if not c or c.startswith("[") or '"saved"' in c or '"booked"' in c:
+        return customer_text
+    return c
+
+
 def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> dict:
     from agent import LANGUAGE_NAMES, rag_query
 
@@ -134,7 +143,7 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
 
     # ---- [1] LLM  <->  [4] tools (think -> act -> observe) ----------------------------
     llm_ms, provider, thoughts, tier = 0, "", [], r.tier
-    tool_outputs, decision, retried = [], {}, False
+    tool_outputs, decision, retried, first_customer_en = [], {}, False, None
     for step in range(MAX_TOOL_STEPS + 1):
         with trace.span("llm", step=step, tier=tier):
             decision, res = llm.chat_json(system, session.history, temperature=0.3, tier=tier)
@@ -151,6 +160,10 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
             llm_ms += res.latency_ms
             provider = res.provider
         thoughts.append(decision.get("thought", ""))
+        if step == 0:
+            # Only the FIRST step translates what the customer said. After a tool call the last "user"
+            # message is the tool result, and models then "translate" that JSON instead.
+            first_customer_en = decision.get("customer_en")
         tool = decision.get("tool")
         if tool and step < MAX_TOOL_STEPS:
             args = decision.get("args") or {}
@@ -169,7 +182,7 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
     reply = decision.get("reply") or "Sorry, could you say that again?"
     language = decision.get("language") or session.language
     reply_en = decision.get("reply_en") or ""
-    customer_en = decision.get("customer_en") or text
+    customer_en = clean_customer_en(first_customer_en, text)
 
     # ---- [6] output guardrails (one regeneration, then a safe fixed reply) --------------
     tool_text = " ".join(json.dumps(o, ensure_ascii=False) for o in tool_outputs)

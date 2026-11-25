@@ -59,6 +59,9 @@ LATENCIES: list[int] = []           # total ms per turn, for the dashboard
 # ---------------------------------------------------------------------------
 class StartCall(BaseModel):
     phone: str = Field(..., min_length=4, max_length=20)
+    # "demo" = the staff demo page with the live cockpit (index.html).
+    # "customer" = the public call page (call.html): the server only ever sends customer-safe fields.
+    mode: str = Field("demo", pattern="^(demo|customer)$")
 
 
 class Turn(BaseModel):
@@ -78,6 +81,18 @@ def _get_session(session_id: str) -> Session:
         raise HTTPException(404, "Call not found or already ended")
     return s
 
+
+def booking_from(events: list) -> dict | None:
+    """The demo booked in this turn (slot + calendar link), for the banner on both pages."""
+    for e in events or []:
+        if e.get("type") == "tool" and e.get("detail") == "book_appointment" and (e.get("result") or {}).get("booked"):
+            return {"slot": e["result"]["slot"], "calendar_link": e["result"]["calendar_link"]}
+    return None
+
+
+# What the CUSTOMER page may receive per turn. Everything else (thoughts, tools, RAG sources,
+# routing, tokens, latency, trace id) is internal and only goes to the staff demo page.
+CUSTOMER_TURN_FIELDS = ("reply", "reply_en", "customer_en", "language", "handoff", "booking", "audio", "voice")
 
 CALLER_FIELDS = ("name", "phone", "email", "company")
 
@@ -108,15 +123,18 @@ async def start_call(body: StartCall, request: Request):
     if len(phone) < 4:
         raise HTTPException(400, "Invalid phone number")
     session = await run_in_threadpool(Session, phone)
+    session.customer_mode = body.mode == "customer"
     SESSIONS[session.id] = session
     text = greeting(session)
-    remember_reply(session, {"thought": "greeting", "tool": None, "args": {}, "reply": text,
-                             "language": session.language})
-    voice = await tts.speak(text, session.language)
+    remember_reply(session, {"thought": "greeting", "tool": None, "args": {}, "reply": text, "language": "en"})
+    voice = await tts.speak(text, "en")        # the greeting is always English text, so an English voice
+    base = {"session_id": session.id, "reply": text, "reply_en": text, "language": "en",
+            "returning": session.returning, **voice}
+    if session.customer_mode:
+        return base
     # No earlier summary and no stored lead details here: see caller_lead().
-    return {"session_id": session.id, "reply": text, "reply_en": text, "language": session.language,
-            "returning": session.returning, "lead": caller_lead(session),
-            "previous_date": session.previous["date"][:10] if session.previous else None, **voice}
+    return {**base, "lead": caller_lead(session),
+            "previous_date": session.previous["date"][:10] if session.previous else None}
 
 
 @app.post("/api/call/turn")
@@ -148,13 +166,18 @@ async def call_turn(body: Turn, background: BackgroundTasks):
 
     # Runs AFTER the response is sent, so the customer never waits for it.
     background.add_task(analyze_turn, session)
-    return {**result, **voice}
+    out = {**result, **voice, "booking": booking_from(result.get("events"))}
+    if session.customer_mode:
+        return {k: out.get(k) for k in CUSTOMER_TURN_FIELDS}
+    return out
 
 
 @app.get("/api/call/{session_id}/live")
 def call_live(session_id: str):
-    """Everything the live cockpit shows."""
+    """Everything the live cockpit shows (staff demo page only)."""
     s = _get_session(session_id)
+    if s.customer_mode:
+        raise HTTPException(403, "The live cockpit is not available on the customer page")
     return {"analysis": s.analysis, "lead": caller_lead(s),
             "transcript": s.transcript, "language": s.language, "handoff": s.handoff}
 
@@ -169,8 +192,17 @@ async def call_end(body: EndCall):
     # The private "my calls" link shows EVERY call of this lead. Hand it out only on the lead's
     # first call (everything on it is from this caller). For a returning number, typing the number
     # must not be enough: the customer keeps the link from their first call, or staff resend it.
-    return {"summary": summary, "lead": caller_lead(session),
-            "portal_url": None if session.returning else portal_path(session.lead_id)}
+    portal_url = None if session.returning else portal_path(session.lead_id)
+    if session.customer_mode:
+        # Only what is written FOR the customer (same fields as the my-calls page). No score, objections
+        # or sales next steps.
+        return {"summary": {"customer_summary": summary.get("customer_summary"),
+                            "customer_next_steps": summary.get("customer_next_steps") or [],
+                            "language": summary.get("language")},
+                "appointments": [{"start": a["start"], "link": a["link"]}
+                                 for a in get_crm().appointments_for_lead(session.lead_id)] if not session.returning else [],
+                "returning": session.returning, "portal_url": portal_url}
+    return {"summary": summary, "lead": caller_lead(session), "portal_url": portal_url}
 
 
 # ---------------------------------------------------------------------------

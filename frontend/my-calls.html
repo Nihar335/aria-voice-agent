@@ -77,6 +77,7 @@ async function load() {
         ${c.transcript.map(t => `<div class="msg ${t.who === "agent" ? "agent" : "customer"}">${esc(t.text)}</div>`).join("")}
       </details></div>`).join("")
     : `<div class="card muted">No calls yet.</div>`;
+  html += `<p style="margin-top:18px"><a href="/call.html">📞 Talk to Aria again</a></p>`;
   $("out").innerHTML = html;
 }
 load().catch(() => $("out").innerHTML = `<div class="card err">Could not reach the server. Please try again later.</div>`);

@@ -30,7 +30,7 @@ from rag import SCOPES, get_kb, list_documents, load_chunks, reload_kb
 
 router = APIRouter(prefix="/api/admin")
 
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_UPLOAD_BYTES = config.MAX_UPLOAD_MB * 1024 * 1024     # MAX_UPLOAD_MB in .env (default 50)
 
 
 def _check_scope(user: dict, scope: str):
@@ -61,7 +61,8 @@ def documents(user: dict = Depends(require("docs:read"))):
             counts[name] = counts.get(name, 0) + 1
         out[scope] = [{"name": p.name, "size": p.stat().st_size, "chunks": counts.get(p.name, 0),
                        "modified": int(p.stat().st_mtime)} for p in list_documents(scope)]
-    return {"documents": out, "search_mode": {s: get_kb(s).mode for s in SCOPES}}
+    return {"documents": out, "search_mode": {s: get_kb(s).mode for s in SCOPES},
+            "max_upload_mb": config.MAX_UPLOAD_MB}
 
 
 class Upload(BaseModel):
@@ -106,7 +107,7 @@ async def upload(body: Upload, user: dict = Depends(require("docs:write"))):
     except ValueError:
         raise HTTPException(400, "File content is not valid base64")
     if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, "File is larger than 10 MB")
+        raise HTTPException(413, f"File is larger than {config.MAX_UPLOAD_MB} MB")
     text = (await run_in_threadpool(_to_text, raw, ext)).strip()
     if not text:
         raise HTTPException(400, "File is empty")

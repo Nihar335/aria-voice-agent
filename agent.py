@@ -78,6 +78,7 @@ class Session:
         self.analysis = {}       # sentiment / BANT score (filled in Stage 4)
         self.abuse_count = 0     # input guardrail: 2nd abusive message -> human handoff
         self.trace_ids = []      # observability: one trace per turn
+        self.customer_mode = False   # True = public call page: API answers contain only customer-safe fields
 
     def memory_text(self) -> str:
         if not self.previous:

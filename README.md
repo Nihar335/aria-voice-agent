@@ -49,6 +49,10 @@ copy .env.example .env          # then paste your keys into .env
 ```
 Open **http://localhost:8000** in Chrome, press **Start call**, allow the microphone and talk. API docs: http://localhost:8000/docs.
 
+Two call pages share the same call code (`frontend/call-core.js`):
+- **http://localhost:8000/call.html** is the **customer page**: just the call. The server runs these calls in `customer` mode and never sends them internal data (score, reasoning, sources, objections).
+- **http://localhost:8000/** is the **staff demo**: the same call plus the live cockpit (lead score, BANT, agent reasoning, latency).
+
 Docker: `docker build -t aria .` then `docker run -p 8000:8000 --env-file .env aria`.
 
 ## Try this conversation
@@ -78,7 +82,8 @@ tts.py           Neural voices (edge-tts) per language
 config.py        Settings from .env
 knowledge_base/  Public company documents the agent answers from (sample pricing)
 knowledge_internal/ Confidential documents, admin search only (git-ignored)
-frontend/        index.html: call screen + live cockpit · admin.html: login, dashboard, knowledge
+frontend/        call.html: customer call page · index.html: staff demo (call + live cockpit) · call-core.js: shared call code
+                 admin.html: login, dashboard, knowledge · my-calls.html: customer's private summary page
 docs/            Architecture, scaling, security, costs
 ```
 
@@ -113,6 +118,7 @@ Uploads default to **Internal**. The client page (`index.html`) has no admin acc
 | `GROQ_MODEL`, `GEMINI_MODEL` | Comma-separated model lists, tried in order (each model has its own rate limit) |
 | `GEMINI_EMBED_MODEL` | Embedding model for RAG |
 | `ADMIN_PASSWORD` | Password for `/admin.html` (empty = admin page disabled) |
+| `MAX_UPLOAD_MB` | Largest file the admin page accepts, in MB (default 50) |
 
 Each module can be tested alone: `python llm.py`, `python rag.py`, `python analysis.py`, `python tts.py`, and `python agent.py` (text chat in the terminal).
 

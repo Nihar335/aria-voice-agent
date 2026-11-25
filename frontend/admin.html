@@ -158,7 +158,7 @@
       <h3>Upload a document</h3>
       <div id="drop" class="drop">
         <b>Drop a file here</b> or click to choose<br>
-        <span class="small muted">.pdf, .md or .txt · up to 10 MB · same name replaces the old version</span>
+        <span class="small muted">.pdf, .md or .txt · up to <span id="maxMb">50</span> MB · same name replaces the old version</span>
       </div>
       <input id="file" type="file" accept=".pdf,.md,.txt" class="hidden">
       <div class="scopes">
@@ -396,10 +396,13 @@ $("loginForm").addEventListener("submit", async (e) => {
 $("logout").onclick = async () => { try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {} saveToken(null); showLogin(); };
 
 // ---------------- Document lists ----------------
+let maxUploadMb = 50;
 const kb = (n) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB";
 
 async function loadDocs() {
   const r = await api("/api/admin/documents");
+  maxUploadMb = r.max_upload_mb || maxUploadMb;     // the server's MAX_UPLOAD_MB setting
+  $("maxMb").textContent = maxUploadMb;
   $("mode").textContent = `Search: public ${r.search_mode.public} · internal ${r.search_mode.internal}`;
   $("internalCard").classList.toggle("hidden", !can("search:internal"));
   for (const scope of ["public", "internal"]) {
@@ -472,7 +475,7 @@ async function uploadFiles(files) {
     line.textContent = `⏳ ${f.name} → ${scope}…`;
     $("queue").prepend(line);
     try {
-      if (f.size > 10 * 1024 * 1024) throw new Error("larger than 10 MB");
+      if (f.size > maxUploadMb * 1024 * 1024) throw new Error(`larger than ${maxUploadMb} MB`);
       const r = await api("/api/admin/documents", { method: "POST",
         body: { filename: f.name, content_b64: await toBase64(f), scope } });
       line.textContent = `✅ ${r.name} → ${r.scope} (${r.chunks} chunks${r.replaced ? ", replaced old version" : ""})`;

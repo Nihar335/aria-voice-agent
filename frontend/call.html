@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talk to Aria · Fortivex AI</title>
+<style>
+  /* Customer call page: ONLY the call. The staff demo with the live cockpit is index.html.
+     The server knows this is a customer call (mode "customer") and never sends internal data here. */
+  :root {
+    --bg: #0b1020; --panel: #131a2e; --panel2: #1a2340; --line: #26314f;
+    --text: #e7ecf7; --muted: #8b97b5; --accent: #5b8cff; --accent2: #7c5cff;
+    --good: #2ecc8f; --warn: #f5b74e; --bad: #ff5d6c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 17px; margin: 0; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  main { padding: 20px 16px; }
+  .hidden { display: none !important; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  button.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff;
+                   border: 0; padding: 10px 18px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+  button.danger { background: var(--bad); color: #fff; border: 0; padding: 10px 18px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+  button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+                 padding: 6px 12px; border-radius: 10px; cursor: pointer; }
+  input, select { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+                  border-radius: 10px; padding: 9px 12px; font: inherit; min-width: 0; }
+  .muted { color: var(--muted); }
+  a { color: var(--accent); }
+
+  .phone { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column;
+           height: calc(100vh - 110px); min-height: 520px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .controls #phone { width: 180px; }
+  .controls label { white-space: nowrap; }
+  .banner { margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
+  .banner.memory { background: rgba(124,92,255,.15); border: 1px solid var(--accent2); }
+  .banner.handoff { background: rgba(255,93,108,.15); border: 1px solid var(--bad); }
+  .banner.booked { background: rgba(46,204,143,.15); border: 1px solid var(--good); }
+  #chat { flex: 1; overflow-y: auto; margin: 12px 0; padding-right: 4px; }
+  .msg { max-width: 85%; padding: 10px 13px; border-radius: 14px; margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.agent { background: var(--panel2); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .msg.customer { background: var(--accent); color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+  .msg .meta { font-size: 11px; opacity: .7; margin-top: 5px; }
+  .talk { display: flex; gap: 8px; align-items: center; }
+  .talk input { flex: 1; }
+  #mic { width: 56px; height: 56px; border-radius: 50%; border: 0; cursor: pointer; font-size: 22px;
+         background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; flex: none; }
+  #mic.listening { background: var(--bad); animation: pulse 1.2s infinite; }
+  #mic:disabled { opacity: .4; cursor: default; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,93,108,.6); } 100% { box-shadow: 0 0 0 16px rgba(255,93,108,0); } }
+  #status { font-size: 12px; color: var(--muted); min-height: 18px; margin-top: 6px; }
+  .note { font-size: 12px; color: var(--muted); text-align: center; margin-top: 10px; }
+
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
+  #modal .card { max-width: 560px; width: 100%; max-height: 85vh; overflow-y: auto; }
+  #modal h3 { margin: 0 0 10px; }
+
+  @media (max-width: 600px) {
+    main { padding: 12px; }
+    .controls #phone, .controls select { flex: 1 1 100%; width: auto; }
+    .controls button { flex: 1 1 100%; }
+    .phone { height: calc(100vh - 90px); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Fortivex AI <span>· Talk to Aria, our AI assistant</span></h1>
+</header>
+
+<main>
+  <div class="card phone">
+    <div class="controls">
+      <input id="phone" type="tel" inputmode="tel" placeholder="Your phone number" autocomplete="tel" maxlength="20"
+             onkeydown="if(event.key==='Enter'){startCall()}">
+      <select id="lang" title="The language you will speak">
+        <optgroup label="English & Hindi">
+          <option value="en">English</option>
+          <option value="hi">हिन्दी Hindi</option>
+          <option value="hinglish">Hinglish (Hindi in English letters)</option>
+        </optgroup>
+        <optgroup label="South Indian">
+          <option value="kn">ಕನ್ನಡ Kannada</option>
+          <option value="te">తెలుగు Telugu</option>
+        </optgroup>
+      </select>
+      <select id="chatView" title="How messages appear in the chat" onchange="setChatView(this.value)">
+        <option value="original">Chat: as spoken</option>
+        <option value="en">Chat: in English</option>
+      </select>
+      <label class="muted" title="Off = your browser's voice, faster"><input type="checkbox" id="natural" checked> Natural voice</label>
+      <label class="muted" title="Aria listens again automatically after she speaks"><input type="checkbox" id="handsfree" checked> Hands-free</label>
+      <span style="flex:1"></span>
+      <button id="startBtn" class="primary" onclick="startCall()">📞 Start call</button>
+      <button id="endBtn" class="danger hidden" onclick="endCall()">End call</button>
+    </div>
+    <div id="banners"></div>
+    <div id="chat"><p class="muted">Enter your phone number, press <b>Start call</b>, allow the microphone, and talk to Aria.
+      Ask about our services and prices, or book a free 30-minute demo. You can speak English, Hindi, Hinglish, Kannada or Telugu.</p></div>
+    <div class="talk">
+      <button id="mic" onclick="toggleMic()" disabled title="Click to talk" aria-label="Talk">🎙️</button>
+      <input id="typed" placeholder="…or type a message and press Enter" disabled
+             onkeydown="if(event.key==='Enter'){sendTyped()}">
+    </div>
+    <div id="status"></div>
+  </div>
+  <p class="note">Please don't share card numbers, OTPs, passwords, Aadhaar or PAN on this call. Aria never needs them.</p>
+</main>
+
+<div id="modal" class="hidden"><div class="card" id="modalBody"></div></div>
+
+<script src="call-core.js"></script>
+<script>
+window.CALL_HOOKS = {
+  startBody() {
+    const phone = $("phone").value.trim();
+    if (phone.replace(/\D/g, "").length < 4) { $("phone").focus(); throw new Error("please enter your phone number"); }
+    return { phone, mode: "customer" };    // customer mode: the server sends no internal data
+  },
+  onStart(r) {
+    if (r.returning) addBanner("memory", "👋 Welcome back! Aria remembers your last call.");
+  },
+  handoffText: "🙋 A Fortivex consultant will call you back shortly.",
+  endedStatus: "Call ended. Thank you for calling Fortivex AI!",
+  onEnd: (r) => showThanks(r),
+};
+
+// After the call: only what was written FOR the customer (same as their private "my calls" page).
+function showThanks(r) {
+  const s = r.summary || {};
+  const steps = (s.customer_next_steps || []).map(x => `<li>${esc(x)}</li>`).join("");
+  const demos = (r.appointments || []).map(a =>
+    `<li>${esc(a.start)} IST · <a href="${safeLink(a.link)}" target="_blank" rel="noopener">Add to Google Calendar</a></li>`).join("");
+  const link = r.portal_url ? location.origin + r.portal_url : "";
+  $("modalBody").innerHTML = `
+    <h3>Thanks for calling Fortivex AI!</h3>
+    <p style="font-size:15px">${esc(s.customer_summary || "Our team will follow up with you soon.")}</p>
+    ${steps ? `<b>What happens next</b><ul>${steps}</ul>` : ""}
+    ${demos ? `<b>Your demo</b><ul>${demos}</ul>` : ""}
+    ${link ? `<div class="banner booked" style="margin:0 0 12px">📄 <b>Your private summary page</b><br>
+        <span class="muted">Open it any time to read your call summaries. Keep the link private.</span><br>
+        <a href="${esc(link)}" target="_blank" rel="noopener">Open my summary page</a>
+        <button class="ghost" style="margin-left:6px" id="copyLink">Copy link</button></div>`
+      : r.returning ? `<p class="muted">Your private summary page is the link you got after your first call. Lost it? Our team can send you a new one.</p>` : ""}
+    <div style="display:flex;justify-content:flex-end"><button class="primary" onclick="$('modal').classList.add('hidden')">Close</button></div>`;
+  if (link) $("copyLink").onclick = (e) => navigator.clipboard.writeText(link).then(() => e.target.textContent = "Copied");
+  $("modal").classList.remove("hidden");
+}
+</script>
+</body>
+</html>
