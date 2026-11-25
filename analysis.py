@@ -22,7 +22,9 @@ from crm import get_crm
 # Common Hindi words written in English letters -> Hinglish.
 HINGLISH_WORDS = set("""hai hain kya kaise kitna kitne kitni mujhe hum aap aapka aapke mera meri mere
 nahi nahin haan ji kar karna karo chahiye chahte batao bataiye accha acha theek thik kaam
-paisa paise wala wali sakte sakta hoga hogi kab kahan kyun lekin aur bhi""".split())
+paisa paise wala wali sakte sakta hoga hogi kab kahan kyun lekin aur bhi
+thoda thodi raha rahe rahi milega milegi chalega mehenga mehnga sasta bahut abhi kuch kaun kaunsa
+matlab samajh dijiye chahta chahti lagega lagta hoon hu tha thi diya kiya karenge batana""".split())
 
 
 def detect_language(text: str) -> str:
@@ -36,6 +38,19 @@ def detect_language(text: str) -> str:
     if len(words & HINGLISH_WORDS) >= 2:
         return "hinglish"
     return "en"
+
+
+def reply_language(text: str, chosen: str | None = None) -> str:
+    """
+    Which language Aria must answer in, decided by code (not left to the model):
+      - Hindi / Kannada / Telugu script, or clear Hinglish -> that language, whatever the menu says
+      - plain English letters -> English, except that a customer who picked Hinglish keeps Hinglish
+        (short Hinglish sentences can look like English to the word list)
+    """
+    detected = detect_language(text)
+    if detected == "en" and chosen == "hinglish":
+        return "hinglish"
+    return detected
 
 
 # ---------------------------------------------------------------------------

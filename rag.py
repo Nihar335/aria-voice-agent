@@ -118,6 +118,8 @@ QUERY_TIME_LIMIT = 1.2   # seconds we are willing to wait for a query embedding 
 
 _cache: dict[str, np.ndarray] = {}   # question -> vector (same question again = 0 ms)
 _slow_until = 0.0                     # "circuit breaker": skip embeddings until this time
+_slow_count = 0                       # slow answers in a row; ONE slow call (e.g. a network blip) is not enough
+SLOW_CALLS_TO_OPEN = 2
 
 
 def _embed_query(question: str) -> np.ndarray:
@@ -128,7 +130,7 @@ def _embed_query(question: str) -> np.ndarray:
       - otherwise wait at most QUERY_TIME_LIMIT seconds, else give up (keyword search is used)
     A slow answer that arrives late is still saved, so the next identical question is instant.
     """
-    global _slow_until
+    global _slow_until, _slow_count
     if question in _cache:
         return _cache[question]
     if time.time() < _slow_until:
@@ -141,10 +143,26 @@ def _embed_query(question: str) -> np.ndarray:
     job = _pool.submit(_gemini_embed, [question], "RETRIEVAL_QUERY")
     job.add_done_callback(save)
     try:
-        return job.result(timeout=QUERY_TIME_LIMIT)[0]
+        vector = job.result(timeout=QUERY_TIME_LIMIT)[0]
     except FutureTimeout:
-        _slow_until = time.time() + 60      # open the circuit for one minute
+        _slow_count += 1
+        if _slow_count >= SLOW_CALLS_TO_OPEN:
+            _slow_until = time.time() + 60      # open the circuit for one minute
+            _slow_count = 0
         raise TimeoutError(f"embedding slower than {QUERY_TIME_LIMIT}s")
+    _slow_count = 0
+    return vector
+
+
+def warm_up():
+    """
+    Open the Gemini connection before the first caller speaks. Without this, the FIRST query pays
+    for creating the client + TLS handshake (often > QUERY_TIME_LIMIT) and falls back to keyword search.
+    """
+    try:
+        _gemini_embed(["hello"], "RETRIEVAL_QUERY")
+    except Exception as e:
+        print(f"[rag] embedding warm-up failed: {e}")
 
 
 def _gemini_embed(texts: list[str], task: str) -> np.ndarray:
@@ -172,8 +190,15 @@ what which who how when where why do does did can could will would should i you 
 our me us about any have has had there here not no yes so if then than also just like get""".split())
 
 
+# Keyword search only matches exact words, so map common ways of asking to one word.
+# ("How much would this cost?" must find the "price and plans" section.)
+SYNONYMS = {w: "price" for w in """price prices pricing priced cost costs costing charge charges charged fee fees
+rate rates tariff expensive cheap affordable mehenga sasta kitna kitne kitni""".split()}
+SYNONYMS.update({"much": "price"})   # "how much" is almost always a price question here
+
+
 def _words(text: str) -> list[str]:
-    return [w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in STOPWORDS]
+    return [SYNONYMS.get(w, w) for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in STOPWORDS]
 
 
 class KeywordIndex:
@@ -215,6 +240,8 @@ class KnowledgeBase:
             try:
                 self.vectors = self._load_or_build_vectors()
                 self.mode = "embeddings"
+                _pool.submit(warm_up)      # in the background: never delays loading
+
             except Exception as e:
                 print(f"[rag:{scope}] Embeddings unavailable, using keyword search. Reason: {e}")
         print(f"[rag:{scope}] {len(self.chunks)} chunks loaded, search mode = {self.mode}")
@@ -246,8 +273,11 @@ class KnowledgeBase:
     # -----------------------------------------------------------------------
     # Step 4: SEARCH
     # -----------------------------------------------------------------------
-    def search(self, question: str, k: int = 3) -> list[dict]:
-        """Return the k most relevant pieces, each with its source and score."""
+    def search(self, question: str, k: int = 3, info: dict | None = None) -> list[dict]:
+        """Return the k most relevant pieces, each with its source and score.
+        `info` (optional) gets the search mode actually used, e.g. for the trace."""
+        info = info if info is not None else {}
+        info["mode"] = self.mode
         if not self.chunks:
             return []
         if self.mode == "embeddings":
@@ -258,6 +288,7 @@ class KnowledgeBase:
             except Exception as e:
                 # Too slow or failed -> instant keyword search, so the caller is not kept waiting.
                 print(f"[rag] Query embedding failed/slow, keyword backup. Reason: {e!r}")
+                info["mode"], info["fallback_reason"] = "keyword (fallback)", str(e)[:120]
                 scores, min_score = np.array(self.keyword.scores(question)), MIN_SCORE_KEYWORD
         else:
             scores, min_score = np.array(self.keyword.scores(question)), MIN_SCORE_KEYWORD

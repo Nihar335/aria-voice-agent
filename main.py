@@ -15,6 +15,7 @@ One full voice turn (the end-to-end workflow):
 """
 import re
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -22,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import config
+import llm
 import tts
 from admin import router as admin_router
 from agent import Session, greeting, handle_turn, remember_reply
@@ -33,7 +35,15 @@ from layers.rbac import require, router as auth_router, users_router
 from portal import portal_path, router as portal_router
 from rag import get_kb
 
-app = FastAPI(title="Fortivex AI Sales Voice Agent")
+@asynccontextmanager
+async def lifespan(_app):
+    # Load the knowledge base (and open the embedding connection) at boot, not on the first
+    # caller's question, so the first answers use meaning search instead of the keyword backup.
+    await run_in_threadpool(get_kb)
+    yield
+
+
+app = FastAPI(title="Fortivex AI Sales Voice Agent", lifespan=lifespan)
 app.include_router(auth_router)    # /api/auth/... Google sign-in, password break-glass, /me
 app.include_router(users_router)   # /api/admin/users (admin only)
 app.include_router(admin_router)   # /api/admin/... (each route checks an RBAC permission)
@@ -69,6 +79,22 @@ def _get_session(session_id: str) -> Session:
     return s
 
 
+CALLER_FIELDS = ("name", "phone", "email", "company")
+
+
+def caller_lead(session: Session) -> dict:
+    """
+    The lead as the CALLER'S OWN screen may see it. A phone number typed into the page is not
+    proof of identity, so for a returning number we only show what this call itself learned
+    (plus the name, which the greeting already says). Score, budget, status, earlier emails and
+    summaries stay in the CRM for staff (admin dashboard).
+    """
+    lead = get_crm().get_lead(session.lead_id) or {}
+    before = session.known_before
+    return {k: lead.get(k) for k in CALLER_FIELDS
+            if k in ("name", "phone") or lead.get(k) != before.get(k)}
+
+
 # ---------------------------------------------------------------------------
 # Call endpoints
 # ---------------------------------------------------------------------------
@@ -87,9 +113,10 @@ async def start_call(body: StartCall, request: Request):
     remember_reply(session, {"thought": "greeting", "tool": None, "args": {}, "reply": text,
                              "language": session.language})
     voice = await tts.speak(text, session.language)
-    lead = get_crm().get_lead(session.lead_id)
+    # No earlier summary and no stored lead details here: see caller_lead().
     return {"session_id": session.id, "reply": text, "reply_en": text, "language": session.language,
-            "returning": session.returning, "lead": lead, "previous": session.previous, **voice}
+            "returning": session.returning, "lead": caller_lead(session),
+            "previous_date": session.previous["date"][:10] if session.previous else None, **voice}
 
 
 @app.post("/api/call/turn")
@@ -128,7 +155,7 @@ async def call_turn(body: Turn, background: BackgroundTasks):
 def call_live(session_id: str):
     """Everything the live cockpit shows."""
     s = _get_session(session_id)
-    return {"analysis": s.analysis, "lead": get_crm().get_lead(s.lead_id),
+    return {"analysis": s.analysis, "lead": caller_lead(s),
             "transcript": s.transcript, "language": s.language, "handoff": s.handoff}
 
 
@@ -139,9 +166,11 @@ async def call_end(body: EndCall):
         await run_in_threadpool(analyze_turn, session)   # make sure we have a score
     summary = await run_in_threadpool(end_call, session)
     SESSIONS.pop(body.session_id, None)
-    # The caller's private link to come back and read their summaries any time.
-    return {"summary": summary, "lead": get_crm().get_lead(session.lead_id),
-            "portal_url": portal_path(session.lead_id)}
+    # The private "my calls" link shows EVERY call of this lead. Hand it out only on the lead's
+    # first call (everything on it is from this caller). For a returning number, typing the number
+    # must not be enough: the customer keeps the link from their first call, or staff resend it.
+    return {"summary": summary, "lead": caller_lead(session),
+            "portal_url": None if session.returning else portal_path(session.lead_id)}
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +203,8 @@ def health():
             "rag_mode": get_kb().mode, "rag_chunks": len(get_kb().chunks),
             "prompt_version": prompts.version(), "router": config.ROUTER_ENABLED,
             "cache": {"enabled": config.CACHE_ENABLED, **cache.stats()},
-            "guardrails": config.GUARDRAILS_ENABLED, "google_sign_in": bool(config.GOOGLE_CLIENT_ID)}
+            "guardrails": config.GUARDRAILS_ENABLED, "google_sign_in": bool(config.GOOGLE_CLIENT_ID),
+            "llm_rate_limited": llm.cooling_down()}
 
 
 # The web page (Stage 6). Mounted last, so /api/... routes win.

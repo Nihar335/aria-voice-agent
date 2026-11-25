@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 
 import llm
-from analysis import detect_language
+from analysis import detect_language, reply_language
 from crm import get_crm
 from layers import cache, guardrails, prompts, router
 from layers.observability import Trace
@@ -85,16 +85,22 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
     # ---- [3] RAG ---------------------------------------------------------------------
     kb = get_kb()
     with trace.span("rag") as sp:
-        hits = kb.search(rag_query(session, text))
-        sp.update(mode=kb.mode, hits=[{"source": h["source"], "score": h["score"]} for h in hits])
+        search_info = {}
+        hits = kb.search(rag_query(session, text), info=search_info)
+        sp.update(**search_info, hits=[{"source": h["source"], "score": h["score"]} for h in hits])
     rag_ms = trace.data["spans"][-1]["ms"]
     session.sources = [h["source"] for h in hits]
     session.events.append({"type": "rag", "detail": f"{len(hits)} facts found", "ms": rag_ms,
                            "sources": session.sources})
 
+    # The language to answer in, decided by code from what the customer actually wrote
+    # (the app's language menu follows Aria's last reply, so it alone would make one wrong switch stick).
+    target_language = reply_language(text, chosen_language)
+    trace.set(reply_language=target_language)
+
     # ---- [7] router ------------------------------------------------------------------
     with trace.span("router") as sp:
-        r = router.route(text, session, bool(hits), chosen_language)
+        r = router.route(text, session, bool(hits), target_language)
         sp.update(kind=r.kind, tier=r.tier, cacheable=r.cacheable, reason=r.reason)
     trace.set(route=r.kind)
     session.events.append({"type": "route", "detail": f"{r.kind} -> {r.tier} model ({r.reason})"})
@@ -106,7 +112,7 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
     # ---- [7] cache -------------------------------------------------------------------
     if r.cacheable:
         with trace.span("cache_get") as sp:
-            hit = cache.get(text, chosen_language, kb, prompt_ver)
+            hit = cache.get(text, target_language, kb, prompt_ver)
             sp.update(hit=bool(hit))
         if hit:
             trace.set(cache_hit=True)
@@ -123,7 +129,7 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
         tools=tool_descriptions(CALLER_ROLE),
         context=facts,
         detected=detect_language(text),
-        chosen=LANGUAGE_NAMES.get(chosen_language or "", "not chosen - match the customer"),
+        chosen=LANGUAGE_NAMES[target_language],
     )
 
     # ---- [1] LLM  <->  [4] tools (think -> act -> observe) ----------------------------
@@ -174,10 +180,14 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
         with trace.span("guard_out", attempt=attempt):
             v = guardrails.check_output(reply, facts=facts + " " + tool_text, customer_text=text,
                                         booked_now=booked_now, has_previous_booking=has_booking,
-                                        language=language)
+                                        language=target_language)
         reply = v.reply
         for rule, detail in v.notes:
             trace.guard("output", rule, "logged", detail)
+        if attempt == 1 and all(rule in guardrails.SOFT_RULES for rule, _ in v.violations):
+            for rule, detail in v.violations:
+                trace.guard("output", rule, "kept after retry", detail)
+            break
         if not v.violations:
             break
         guard_rules += [rule for rule, _ in v.violations]
@@ -190,6 +200,7 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
                    {"role": "user", "content": (
                        f"[GUARDRAIL] Your last reply was blocked: {reasons}. Rewrite it using ONLY the COMPANY FACTS "
                        "and tool results. Do not state any price, guarantee or booking that is not in them. "
+                       f"Write the reply in {LANGUAGE_NAMES[target_language]}. "
                        "Same JSON shape, tool must be null.")}]
             with trace.span("llm", step="regenerate", tier="strong"):
                 decision, res = llm.chat_json(system, session.history + fix, temperature=0.2, tier="strong")
@@ -200,13 +211,14 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
             language = decision.get("language") or language
             reply_en = decision.get("reply_en") or reply_en
         else:
-            reply = guardrails.SAFE_FALLBACK[v.violations[0][0]]
+            hard = next(rule for rule, _ in v.violations if rule not in guardrails.SOFT_RULES)
+            reply = guardrails.SAFE_FALLBACK[hard]
             language, reply_en = "en", reply
 
     # ---- [7] cache.put: only clean, tool-free, impersonal FAQ answers -----------------
     name = (get_crm().get_lead(session.lead_id) or {}).get("name") or ""
     if r.cacheable and not tool_outputs and not guard_rules and not (name and name.lower() in reply.lower()):
-        cache.put(text, chosen_language, kb, prompt_ver,
+        cache.put(text, target_language, kb, prompt_ver,
                   {"reply": reply, "language": language, "reply_en": reply_en, "customer_en": customer_en,
                    "sources": sorted(set(session.sources))})
 

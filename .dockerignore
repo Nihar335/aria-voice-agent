@@ -1,8 +1,13 @@
+# Secrets and local tooling
 .env
 .venv
 .git
 .claude
-learn
-data/*.db
-data/rag_index.json
 __pycache__
+*.pyc
+learn
+voice_samples
+# Confidential documents must never be baked into an image: mount them at run time if needed
+knowledge_internal
+# Local data: databases, search indexes, eval reports, test audio (rebuilt/created at run time)
+data

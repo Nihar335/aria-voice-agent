@@ -204,6 +204,7 @@ let busy = false;          // waiting for the agent's reply
 let speaking = false;      // agent audio is playing
 let currentAudio = null;
 let pollTimer = null;
+let returningCaller = false;
 
 // ============================================================================
 // 1. Start / end the call
@@ -216,9 +217,11 @@ async function startCall() {
     sessionId = r.session_id;
     $("chat").innerHTML = ""; $("trace").innerHTML = ""; $("banners").innerHTML = "";
     resetCockpit();
-    if (r.returning && r.previous) {
-      addBanner("memory", `🧠 Returning caller${r.lead.name ? " — " + esc(r.lead.name) : ""}. Memory from ${esc(r.previous.date.slice(0, 10))}: ${esc(r.previous.summary)}`);
+    if (r.returning) {
+      // The earlier summary stays on the server: anyone can type a phone number, so the page never shows it.
+      addBanner("memory", `🧠 Returning caller${r.previous_date ? " (last call " + esc(r.previous_date) + ")" : ""}. Aria remembers the last call; the details stay in the CRM.`);
     }
+    returningCaller = !!r.returning;
     $("startBtn").classList.add("hidden"); $("endBtn").classList.remove("hidden");
     $("mic").disabled = false; $("typed").disabled = false;
     addMessage("agent", r.reply, r.voice ? `voice: ${r.voice}` : "", r.reply_en);
@@ -260,8 +263,10 @@ async function sendTurn(text) {
     const meta = [r.language, r.sources.length ? "📄 " + r.sources.length + " source(s)" : ""].filter(Boolean).join(" · ");
     addMessage("agent", r.reply, meta, r.reply_en);
     showTurnDetails(r);
-    // If the customer switched language, switch the microphone too.
-    if (SPEECH_CODE[r.language]) $("lang").value = r.language;
+    // If the customer switched language, switch the microphone too. English <-> Hinglish use the same
+    // recognizer (en-IN), so the menu stays as the customer set it: the server then answers an English
+    // question in English even right after a Hinglish turn.
+    if (SPEECH_CODE[r.language] && SPEECH_CODE[r.language] !== SPEECH_CODE[$("lang").value]) $("lang").value = r.language;
     busy = false;
     await speak(r);
   } catch (e) {
@@ -518,7 +523,8 @@ function showSummary(s, lead, portalUrl) {
     ${portalUrl ? `<div class="banner booked" style="margin:0 0 12px">📄 <b>Customer's private summary page</b><br>
       <span class="muted">The customer can open this any time to read their own call summaries (no internal notes).</span><br>
       <a href="${esc(portalUrl)}" target="_blank" rel="noopener">${esc(location.origin + portalUrl.split("#")[0])}#…</a>
-      <button class="ghost" style="padding:3px 10px;margin-left:6px" onclick="navigator.clipboard.writeText(location.origin + ${esc(JSON.stringify(portalUrl))}).then(() => this.textContent = 'Copied')">Copy link</button></div>` : ""}
+      <button class="ghost" style="padding:3px 10px;margin-left:6px" onclick="navigator.clipboard.writeText(location.origin + ${esc(JSON.stringify(portalUrl))}).then(() => this.textContent = 'Copied')">Copy link</button></div>`
+      : returningCaller ? `<div class="banner memory" style="margin:0 0 12px">📄 Your private summary page is the link you got after your first call. Lost it? Our team can send you a new one.</div>` : ""}
     <p><b>Lead:</b> ${esc(lead.name || "unknown")} · ${esc(lead.phone)} ${lead.email ? "· " + esc(lead.email) : ""} ${lead.company ? "· " + esc(lead.company) : ""}</p>
     <b>Needs</b>${list(s.customer_needs)}
     <b>Objections</b>${list(s.objections)}

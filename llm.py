@@ -15,6 +15,7 @@ Message format used everywhere in this project (same as OpenAI style):
      {"role": "assistant", "content": "Hello! How can I help?"}]
 """
 import json
+import re
 import time
 from dataclasses import dataclass
 
@@ -137,6 +138,32 @@ def _models(provider: str, tier: str = "strong") -> list[str]:
 # ---------------------------------------------------------------------------
 # The function the whole app uses
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Rate-limit cooldown: a model that answered "429 / quota exceeded" is skipped for a while,
+# instead of being tried (and failing) again on every single turn.
+# ---------------------------------------------------------------------------
+_cooldown: dict[str, float] = {}    # "groq/openai/gpt-oss-20b" -> time it may be tried again
+DEFAULT_COOLDOWN_S = 60
+
+
+def _is_rate_limit(e: Exception) -> bool:
+    s = str(e).lower()
+    return "429" in s or "rate limit" in s or "resource_exhausted" in s or "quota" in s
+
+
+def _retry_after(e: Exception) -> float:
+    """Seconds to wait, from messages like 'Please try again in 1m12.5s' or '... in 8.2s'."""
+    m = re.search(r"try again in (?:(\d+)m)?(?:([\d.]+)s)?", str(e))
+    seconds = (int(m.group(1) or 0) * 60 + float(m.group(2) or 0)) if m else 0
+    return min(max(seconds, 5), 600) if seconds else DEFAULT_COOLDOWN_S
+
+
+def cooling_down() -> dict[str, int]:
+    """Models currently skipped because of rate limits -> seconds left (shown in /api/health)."""
+    now = time.time()
+    return {k: int(t - now) for k, t in _cooldown.items() if t > now}
+
+
 def chat(system: str, messages: list, json_mode: bool = False, temperature: float = 0.4,
          prefer: str | None = None, tier: str = "strong") -> LLMResult:
     """
@@ -154,21 +181,32 @@ def chat(system: str, messages: list, json_mode: bool = False, temperature: floa
     first = prefer or config.LLM_PROVIDER
     order = [first] + [p for p in PROVIDERS if p != first]
 
+    candidates = [(name, model) for name in order for model in _models(name, tier)]
+    now = time.time()
+    ready = [c for c in candidates if _cooldown.get(f"{c[0]}/{c[1]}", 0) <= now]
+    if not ready:            # everything is rate-limited: try them all anyway rather than fail outright
+        ready = candidates
+
     errors = []
     start = time.perf_counter()     # latency includes any failed attempts (honest number)
-    for name in order:
-        for model in _models(name, tier):
-            try:
-                text, usage = PROVIDERS[name](model, system, messages, json_mode, temperature)
-                latency = int((time.perf_counter() - start) * 1000)
-                sent = system + "".join(m["content"] for m in messages)
-                return LLMResult(text=text.strip(), provider=f"{name}/{model}", latency_ms=latency,
-                                 input_tokens=usage.get("in") or _estimate_tokens(sent),
-                                 output_tokens=usage.get("out") or _estimate_tokens(text),
-                                 failed=tuple(errors), tier=tier)
-            except Exception as e:  # overloaded, rate limit, no key, network error...
-                errors.append(f"{name}/{model}: {str(e)[:120]}")
-                print(f"[llm] {name}/{model} failed, trying backup. Reason: {str(e)[:120]}")
+    for name, model in ready:
+        key = f"{name}/{model}"
+        try:
+            text, usage = PROVIDERS[name](model, system, messages, json_mode, temperature)
+            latency = int((time.perf_counter() - start) * 1000)
+            sent = system + "".join(m["content"] for m in messages)
+            _cooldown.pop(key, None)
+            return LLMResult(text=text.strip(), provider=key, latency_ms=latency,
+                             input_tokens=usage.get("in") or _estimate_tokens(sent),
+                             output_tokens=usage.get("out") or _estimate_tokens(text),
+                             failed=tuple(errors), tier=tier)
+        except Exception as e:  # overloaded, rate limit, no key, network error...
+            errors.append(f"{key}: {str(e)[:120]}")
+            if _is_rate_limit(e):
+                _cooldown[key] = time.time() + _retry_after(e)
+                print(f"[llm] {key} rate-limited, skipping it for {int(_cooldown[key] - time.time())} s.")
+            else:
+                print(f"[llm] {key} failed, trying backup. Reason: {str(e)[:120]}")
 
     raise RuntimeError("All LLM providers failed -> " + " | ".join(errors))
 

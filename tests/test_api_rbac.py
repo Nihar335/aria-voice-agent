@@ -72,5 +72,40 @@ class ServerSideRBAC(unittest.TestCase):
         self.assertEqual(client.get("/api/admin/quality", headers=h).status_code, 401)
 
 
+class PhoneNumberIsNotIdentity(unittest.TestCase):
+    """Typing someone's phone number on the call page must not reveal their data."""
+
+    def setUp(self):
+        async def no_voice(text, language="en"):
+            return {"audio": None, "voice": "browser", "tts_ms": 0}
+        self._speak, main.tts.speak = main.tts.speak, no_voice
+        # No turns are sent and the end-call summary is stubbed, so this test needs no LLM or network.
+        self._end, main.end_call = main.end_call, lambda s: {"summary": "test", "call_id": 0}
+
+    def tearDown(self):
+        main.tts.speak, main.end_call = self._speak, self._end
+
+    def test_returning_number_gets_no_stored_details(self):
+        from crm import get_crm
+        crm = get_crm()
+        first = client.post("/api/call/start", json={"phone": "9000077777"}).json()
+        self.assertFalse(first["returning"])
+        lead_id = crm.find_lead_by_phone("9000077777")["id"]
+        crm.update_lead(lead_id, {"name": "Ravi", "email": "ravi@clinic.in", "budget": "2 lakh", "score": 80})
+        crm.save_call(lead_id, [{"who": "customer", "text": "secret"}], {"summary": "internal notes"})
+        end1 = client.post("/api/call/end", json={"session_id": first["session_id"]}).json()
+        self.assertTrue(end1["portal_url"])                      # first call: the link is theirs
+
+        r = client.post("/api/call/start", json={"phone": "9000077777"}).json()
+        self.assertTrue(r["returning"])
+        self.assertNotIn("previous", r)
+        self.assertEqual(set(r["lead"]), {"name", "phone"})      # no email, budget, score...
+        live = client.get(f"/api/call/{r['session_id']}/live").json()
+        self.assertEqual(set(live["lead"]), {"name", "phone"})
+        end = client.post("/api/call/end", json={"session_id": r["session_id"]}).json()
+        self.assertIsNone(end["portal_url"])                     # no link to every earlier call
+        self.assertNotIn("email", end["lead"])
+
+
 if __name__ == "__main__":
     unittest.main()

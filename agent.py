@@ -65,6 +65,9 @@ class Session:
             lead = crm.create_lead(phone)
         self.lead_id = lead["id"]
         self.previous = crm.last_call_summary(self.lead_id) if self.returning else None
+        # Typing a phone number proves nothing, so the caller's own screen may only show what THIS
+        # call learned. This snapshot lets main.caller_lead() hide what earlier calls stored.
+        self.known_before = dict(lead) if self.returning else {}
 
         self.history = []        # what the LLM sees: user / assistant messages
         self.transcript = []     # clean conversation for the summary: [{"who", "text"}]
@@ -80,12 +83,17 @@ class Session:
         if not self.previous:
             return ""
         lead = get_crm().get_lead(self.lead_id)
-        demos = [a["start"] for a in get_crm().list_appointments() if a["lead_id"] == self.lead_id]
+        demos = [a["start"] for a in get_crm().appointments_for_lead(self.lead_id)]
+        # Only the customer-facing summary: internal notes (score, objections, sales tactics) never
+        # go into the prompt, so the agent can't repeat them to whoever typed this number.
+        last = self.previous.get("customer_summary") or "no customer summary saved"
         return (
-            "\nRETURNING CUSTOMER - you spoke before. Greet them by name and refer to the last call naturally.\n"
-            f"Name: {lead.get('name') or 'unknown'}. Last call ({self.previous['date'][:10]}): "
-            f"{self.previous.get('summary', '')}\n"
+            "\nRETURNING CUSTOMER - this phone number called before. Greet them by name and refer to the last call naturally.\n"
+            f"Name: {lead.get('name') or 'unknown'}. Last call ({self.previous['date'][:10]}): {last}\n"
             f"Demos already booked (IST): {', '.join(demos) if demos else 'none'}\n"
+            "The caller's identity is NOT verified (anyone can type a number). Speak about the last call only in "
+            "general terms. Never read out their stored email, phone number, budget or other personal details "
+            "unless they said them first in THIS call.\n"
         )
 
 

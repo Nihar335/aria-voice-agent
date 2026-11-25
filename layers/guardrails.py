@@ -57,8 +57,26 @@ def _luhn_ok(digits: str) -> bool:
     return total % 10 == 0
 
 
+_VERHOEFF_D = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [1, 2, 3, 4, 0, 6, 7, 8, 9, 5], [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+               [3, 4, 0, 1, 2, 8, 9, 5, 6, 7], [4, 0, 1, 2, 3, 9, 5, 6, 7, 8], [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
+               [6, 5, 9, 8, 7, 1, 0, 4, 3, 2], [7, 6, 5, 9, 8, 2, 1, 0, 4, 3], [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
+               [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]]
+_VERHOEFF_P = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [1, 5, 7, 6, 2, 8, 3, 0, 9, 4], [5, 8, 0, 3, 7, 9, 6, 1, 4, 2],
+               [8, 9, 1, 6, 0, 4, 3, 5, 2, 7], [9, 4, 5, 3, 1, 2, 6, 8, 7, 0], [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
+               [2, 7, 9, 3, 8, 0, 6, 4, 1, 5], [7, 0, 4, 6, 9, 1, 3, 2, 5, 8]]
+
+
+def _verhoeff_ok(digits: str) -> bool:
+    """Aadhaar's check digit (Verhoeff algorithm)."""
+    c = 0
+    for i, d in enumerate(reversed(digits)):
+        c = _VERHOEFF_D[c][_VERHOEFF_P[i % 8][int(d)]]
+    return c == 0
+
+
 _CARD = re.compile(r"\b(?:\d[ -]?){12,18}\d\b")
 _AADHAAR = re.compile(r"\b[2-9]\d{3}[ -]?\d{4}[ -]?\d{4}\b")
+_AADHAAR_WORD = re.compile(r"\b(aadhaa?r|aadhar|uidai|uid)\b|आधार", re.I)
 _PAN = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b", re.I)
 _OTP = re.compile(r"\b(otp|one[- ]time password|pin|cvv)\b\D{0,15}(\d{3,8})", re.I)
 _PASSWORD = re.compile(r"\b(password|passcode|pwd)\b(\s*(is|:|=)\s*)(\S+)", re.I)
@@ -76,9 +94,22 @@ def mask_sensitive(text: str) -> tuple[str, list[str]]:
         return m.group()
 
     text = _CARD.sub(card, text)
-    if _AADHAAR.search(text):
+    said_aadhaar = bool(_AADHAAR_WORD.search(text))
+    aadhaar_hits = []
+
+    def aadhaar(m):
+        digits = re.sub(r"\D", "", m.group())
+        # "+91 98765 43210" / "919876543210" is a mobile number with the country code, not Aadhaar.
+        is_mobile = (digits.startswith("91") and digits[2] in "6789") or text[max(0, m.start() - 1):m.start()] == "+"
+        # Real Aadhaar numbers end in a Verhoeff check digit; most other 12-digit numbers fail it.
+        if said_aadhaar or (not is_mobile and _verhoeff_ok(digits)):
+            aadhaar_hits.append(m.group())
+            return "[AADHAAR REMOVED]"
+        return m.group()
+
+    text = _AADHAAR.sub(aadhaar, text)
+    if aadhaar_hits:
         found.append("aadhaar")
-        text = _AADHAAR.sub("[AADHAAR REMOVED]", text)
     if _PAN.search(text):
         found.append("pan")
         text = _PAN.sub("[PAN REMOVED]", text)
@@ -95,17 +126,28 @@ _INJECTION = [
     r"ignore (all |any |the |your )?(previous |prior |above |earlier )?(instructions|rules|prompt)",
     r"(forget|disregard|override) (all |your |the )?(previous |prior )?(instructions|rules|prompt)",
     r"(show|reveal|print|repeat|tell me|what is|what's) (me )?(your|the) (system )?(prompt|instructions|rules)",
-    r"system prompt", r"developer mode", r"\bjailbreak", r"\bDAN\b",
-    r"you are (now|no longer)", r"pretend (to be|you are)", r"act as (a|an|the) (?!customer)",
+    r"system prompt", r"developer mode", r"\bjailbreak", r"\bDAN mode\b", r"\bdo anything now\b",
+    # "Can your bot act as a receptionist?" is a normal sales question; only role-switch ATTACKS are blocked.
+    r"you are (now|no longer)", r"pretend (to be|you are)",
+    r"\b(from now on|now|you will|you must|i want you to)\s+(act|behave|respond) as\b",
+    r"\bact as (if you (have|had) no|an? (unrestricted|unfiltered|jailbroken|uncensored))",
     r"(respond|reply|answer) (only )?in (json|code|markdown)",
-    r"\[?(tool result|system|assistant)\]?\s*:", r"\[\s*(tool result|system|guardrail)\b",
+    # Fake chat-role markers, only at the start of the message or a line ("Our system: Excel" is fine).
+    r"(^|\n)\s*\[?(tool result|system|assistant)\]?\s*:", r"\[\s*(tool result|system|guardrail|assistant)\b",
     r"book_appointment\(|handoff_to_human\(",
     r"apne (instructions|rules) (bhool|ignore)",
 ]
 _INJECTION_RE = re.compile("|".join(_INJECTION), re.I)
 
-_ABUSE_RE = re.compile(
-    r"\b(fuck\w*|shit|bastard|bitch|idiot|stupid bot|useless bot|chutiya|bhenchod|madarchod|harami|kutta|kamina)\b", re.I)
+# Slurs that are abusive whoever they are aimed at.
+_ABUSE_RE = re.compile(r"\b(fuck\w*|chutiya|bhenchod|madarchod)\b", re.I)
+# Insults count only when aimed at Aria ("you idiot", "stupid bot"), not at a third person
+# ("my receptionist is an idiot" is a customer describing their problem).
+_INSULT = r"(idiot|stupid|useless|dumb|bastard|bitch|harami|kutta|kamina|bakwas)"
+_AT_AGENT = r"(you|you're|youre|u|bot|aria|tum|tu|aap)"
+_INSULT_RE = re.compile(
+    rf"\b{_AT_AGENT}\b(\s+\w+){{0,3}}?\s+(an?\s+)?{_INSULT}\b|\b{_INSULT}\s+(bot|aria|machine|ai)\b|^\s*{_INSULT}\s*[.!]*\s*$",
+    re.I)
 
 
 @dataclass
@@ -128,7 +170,7 @@ def check_input(text: str, session) -> InputVerdict:
                          "What would you like to know about them?")
         return v
 
-    if _ABUSE_RE.search(masked):
+    if _ABUSE_RE.search(masked) or _INSULT_RE.search(masked):
         v.flags.append("abuse")
         session.abuse_count = getattr(session, "abuse_count", 0) + 1
         if session.abuse_count >= 2:
@@ -227,6 +269,20 @@ _PROMISE_RE = re.compile(
 _BOOKED_RE = re.compile(
     r"\b(i('ve| have)|it's|its|is|has been|you're|you are|demo is|all set|successfully)\b[^.?!]{0,30}"
     r"\b(booked|scheduled|confirmed)\b|\bbooking (is )?confirmed\b", re.I)
+# Not a booking claim: "our calendar is fully booked", "that slot is not booked", "11 AM is already booked".
+_NOT_A_BOOKING_RE = re.compile(
+    r"\b(fully|not|never|no longer|isn't|wasn't|hasn't|already)\b|n't\b|\b(booked up|slots? (is|are)|time (is|was))\b", re.I)
+
+
+def claims_booking(reply: str) -> bool:
+    for m in _BOOKED_RE.finditer(reply):
+        span = m.group()
+        negated = bool(_NOT_A_BOOKING_RE.search(span))
+        # "I've already booked it" IS a claim; "11 AM is already booked" is not.
+        self_claim = bool(re.match(r"i('ve| have)\b", span, re.I)) and not re.search(r"\b(not|never)\b|n't", span, re.I)
+        if not negated or self_claim:
+            return True
+    return False
 _LEAK_MARKERS = ["COMPANY FACTS", "RESPOND ONLY WITH JSON", "SECURITY RULES", "TOOLS YOU CAN USE",
                  "LANGUAGE RULES", "reply_en", "customer_en"]
 _EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F000-\U0001F2FF]")
@@ -237,7 +293,9 @@ def clean_for_voice(reply: str) -> tuple[str, bool]:
     """Remove markdown and emojis, cut very long replies to 2 sentences. Returns (text, changed)."""
     original = reply
     reply = _EMOJI_RE.sub("", reply)
-    reply = re.sub(r"[*_#`>]+", "", reply)
+    reply = re.sub(r"[*#`>]+", "", reply)
+    # Markdown _italics_ go, but an underscore INSIDE a word stays ("ravi_kumar@gmail.com").
+    reply = re.sub(r"(?<!\w)_+|_+(?!\w)", "", reply)
     reply = re.sub(r"^\s*([-•]|\d+\.)\s+", "", reply, flags=re.M)
     reply = re.sub(r"\s*\n\s*", " ", reply).strip()
     if len(reply.split()) > 60:
@@ -273,16 +331,37 @@ def check_output(reply: str, *, facts: str, customer_text: str, booked_now: bool
             v.violations.append(("unsupported_promise", m.group()))
             break
 
-    if _BOOKED_RE.search(reply) and not booked_now and not has_previous_booking:
+    if claims_booking(reply) and not booked_now and not has_previous_booking:
         v.violations.append(("fake_booking", "reply claims a booking but book_appointment did not succeed"))
 
     if any(marker.lower() in reply.lower() for marker in _LEAK_MARKERS):
         v.violations.append(("prompt_leak", "reply contains system prompt text"))
 
-    script = _SCRIPTS.get(language or "")
-    if script and not re.search(script, reply):
-        v.notes.append(("language_mismatch", f"expected {language} script"))
+    # `language` = the language the customer used (decided by code). Small models sometimes keep
+    # answering in the previous turn's language. That is regenerated once, but never replaced by a
+    # canned reply (a wrong-language answer is still better than no answer): see SOFT_RULES.
+    wrong = language_problem(reply, language)
+    if wrong:
+        v.violations.append(("language_mismatch", wrong))
     return v
+
+
+SOFT_RULES = {"language_mismatch"}    # regenerate once, but never fall back to a fixed reply
+
+
+def language_problem(reply: str, expected: str | None) -> str | None:
+    from analysis import detect_language
+    if not expected or not reply.strip():
+        return None
+    script = _SCRIPTS.get(expected)
+    if script:
+        return None if re.search(script, reply) else f"expected {expected} script"
+    got = detect_language(reply)
+    if expected == "en" and got != "en":
+        return f"customer spoke English, reply is {got}"
+    if expected == "hinglish" and got != "hinglish":
+        return f"customer spoke Hinglish (Hindi in English letters), reply is {got}"
+    return None
 
 
 SAFE_FALLBACK = {
