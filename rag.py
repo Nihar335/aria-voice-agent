@@ -19,6 +19,7 @@ import hashlib
 import json
 import math
 import re
+import threading
 from collections import Counter
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -28,7 +29,6 @@ import numpy as np
 
 import config
 
-INDEX_FILE = config.DATA_DIR / "rag_index.json"
 
 # A piece must be at least this similar to the question to count as relevant.
 # Below this, we tell the agent "no info found" instead of letting it guess.
@@ -37,28 +37,74 @@ MIN_SCORE_KEYWORD = 0.12
 
 
 # ---------------------------------------------------------------------------
+# Two separate collections. This split is the security boundary:
+#   public   -> the voice agent may read these and say them to customers
+#   internal -> confidential. Only the admin page can search them. The agent
+#               never gets them, so it CANNOT leak them (an LLM can't reveal
+#               text that was never put in its prompt).
+# ---------------------------------------------------------------------------
+SCOPES = {
+    "public": config.KNOWLEDGE_DIR,
+    "internal": config.INTERNAL_KNOWLEDGE_DIR,
+}
+DOC_EXTENSIONS = (".md", ".txt")
+MAX_CHUNK_CHARS = 1200
+
+
+# ---------------------------------------------------------------------------
 # Step 1: CHUNK
 # ---------------------------------------------------------------------------
-def load_chunks() -> list[dict]:
-    """Read every .md file and cut it at each '## ' heading."""
+def _split_plain(text: str) -> list[str]:
+    """For text without '## ' headings (e.g. an uploaded PDF): group paragraphs into ~1200-char pieces."""
+    pieces, current = [], ""
+    for para in re.split(r"\n\s*\n", text):
+        para = para.strip()
+        if not para:
+            continue
+        if current and len(current) + len(para) > MAX_CHUNK_CHARS:
+            pieces.append(current)
+            current = ""
+        current = f"{current}\n\n{para}".strip()
+        while len(current) > MAX_CHUNK_CHARS * 1.5:     # one giant paragraph -> hard cut
+            pieces.append(current[:MAX_CHUNK_CHARS])
+            current = current[MAX_CHUNK_CHARS:]
+    if current:
+        pieces.append(current)
+    return pieces
+
+
+def list_documents(scope: str = "public") -> list:
+    folder = SCOPES[scope]
+    return sorted(p for p in folder.glob("*") if p.is_file() and p.suffix.lower() in DOC_EXTENSIONS)
+
+
+def load_chunks(scope: str = "public") -> list[dict]:
+    """Read every document and cut it at each '## ' heading (or into paragraphs if it has none)."""
     chunks = []
-    for path in sorted(config.KNOWLEDGE_DIR.glob("*.md")):
-        text = path.read_text(encoding="utf-8")
-        # First line "# Title" is the document title.
-        title = text.splitlines()[0].lstrip("# ").strip()
-        # Split right before every line that starts with "## ".
-        sections = re.split(r"\n(?=## )", text)
-        for section in sections:
-            section = section.strip()
-            if not section.startswith("## "):
-                continue  # skip the part before the first heading
-            heading = section.splitlines()[0].lstrip("# ").strip()
-            chunks.append({
-                "id": f"{path.stem}#{len(chunks)}",
-                "source": f"{path.name} > {heading}",   # shown to the user as the source
-                # Put the title + heading inside the text so the search knows the context.
-                "text": f"{title} - {section.lstrip('# ')}",
-            })
+    for path in list_documents(scope):
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+        if not text:
+            continue
+        first = text.splitlines()[0]
+        # First line "# Title" is the document title; otherwise use the file name.
+        title = first.lstrip("# ").strip() if first.startswith("# ") else path.stem.replace("_", " ")
+        sections = [s.strip() for s in re.split(r"\n(?=## )", text) if s.strip().startswith("## ")]
+        if sections:
+            for section in sections:
+                heading = section.splitlines()[0].lstrip("# ").strip()
+                chunks.append({
+                    "id": f"{path.stem}#{len(chunks)}",
+                    "source": f"{path.name} > {heading}",   # shown to the user as the source
+                    # Put the title + heading inside the text so the search knows the context.
+                    "text": f"{title} - {section.lstrip('# ')}",
+                })
+        else:
+            for n, piece in enumerate(_split_plain(text), 1):
+                chunks.append({
+                    "id": f"{path.stem}#{len(chunks)}",
+                    "source": f"{path.name} > part {n}",
+                    "text": f"{title} - {piece}",
+                })
     return chunks
 
 
@@ -158,40 +204,52 @@ class KeywordIndex:
 # Step 3: STORE  (build once, reuse until the documents change)
 # ---------------------------------------------------------------------------
 class KnowledgeBase:
-    def __init__(self):
-        self.chunks = load_chunks()
+    def __init__(self, scope: str = "public"):
+        self.scope = scope
+        self.index_file = config.DATA_DIR / ("rag_index.json" if scope == "public" else f"rag_index_{scope}.json")
+        self.chunks = load_chunks(scope)
         self.keyword = KeywordIndex([c["text"] for c in self.chunks])
         self.vectors = None   # filled if Gemini embeddings work
         self.mode = "keyword"
-        if config.GEMINI_API_KEY:
+        if config.GEMINI_API_KEY and self.chunks:
             try:
                 self.vectors = self._load_or_build_vectors()
                 self.mode = "embeddings"
             except Exception as e:
-                print(f"[rag] Embeddings unavailable, using keyword search. Reason: {e}")
-        print(f"[rag] {len(self.chunks)} chunks loaded, search mode = {self.mode}")
+                print(f"[rag:{scope}] Embeddings unavailable, using keyword search. Reason: {e}")
+        print(f"[rag:{scope}] {len(self.chunks)} chunks loaded, search mode = {self.mode}")
 
     def _load_or_build_vectors(self) -> np.ndarray:
-        # A "fingerprint" of all documents + model. If any document changes,
-        # the fingerprint changes and we rebuild. Otherwise we reuse the saved file.
-        fingerprint = hashlib.md5(
-            (config.GEMINI_EMBED_MODEL + "".join(c["text"] for c in self.chunks)).encode()
-        ).hexdigest()
-        if INDEX_FILE.exists():
-            saved = json.loads(INDEX_FILE.read_text())
-            if saved.get("fingerprint") == fingerprint:
-                return np.array(saved["vectors"], dtype=np.float32)
-
-        print("[rag] Building embeddings index (one time)...")
-        vectors = _gemini_embed([c["text"] for c in self.chunks], "RETRIEVAL_DOCUMENT")
-        INDEX_FILE.write_text(json.dumps({"fingerprint": fingerprint, "vectors": vectors.tolist()}))
-        return vectors
+        # Vectors are saved per chunk, keyed by a hash of (model + text). After an upload
+        # only the NEW chunks are sent to Gemini; unchanged ones are reused from the file.
+        key = lambda text: hashlib.md5((config.GEMINI_EMBED_MODEL + text).encode()).hexdigest()
+        saved = {}
+        if self.index_file.exists():
+            try:
+                saved = json.loads(self.index_file.read_text()).get("chunks", {})
+            except (ValueError, AttributeError):
+                saved = {}   # old/corrupt format -> rebuild
+        keys = [key(c["text"]) for c in self.chunks]
+        missing = [i for i, k in enumerate(keys) if k not in saved]
+        if missing:
+            print(f"[rag:{self.scope}] Embedding {len(missing)} new chunk(s)...")
+            for start in range(0, len(missing), 100):            # Gemini accepts up to 100 per call
+                batch = missing[start:start + 100]
+                vecs = _gemini_embed([self.chunks[i]["text"] for i in batch], "RETRIEVAL_DOCUMENT")
+                for i, v in zip(batch, vecs):
+                    saved[keys[i]] = v.tolist()
+        # Keep only chunks that still exist, so deleted documents leave no trace in the index.
+        saved = {k: saved[k] for k in keys}
+        self.index_file.write_text(json.dumps({"chunks": saved}))
+        return np.array([saved[k] for k in keys], dtype=np.float32)
 
     # -----------------------------------------------------------------------
     # Step 4: SEARCH
     # -----------------------------------------------------------------------
     def search(self, question: str, k: int = 3) -> list[dict]:
         """Return the k most relevant pieces, each with its source and score."""
+        if not self.chunks:
+            return []
         if self.mode == "embeddings":
             try:
                 q = _embed_query(question)
@@ -219,15 +277,28 @@ def format_context(results: list[dict]) -> str:
     return "\n\n".join(f"[Source: {r['source']}]\n{r['text']}" for r in results)
 
 
-# One shared knowledge base for the whole app (built when first imported).
-kb = None
+# One knowledge base per scope, built when first used.
+_kbs: dict[str, KnowledgeBase] = {}
+_lock = threading.Lock()
 
 
-def get_kb() -> KnowledgeBase:
-    global kb
-    if kb is None:
-        kb = KnowledgeBase()
-    return kb
+def get_kb(scope: str = "public") -> KnowledgeBase:
+    """The voice agent only ever calls get_kb() -> public. Internal is for the admin page."""
+    if scope not in SCOPES:
+        raise ValueError(f"unknown scope {scope!r}")
+    if scope not in _kbs:
+        with _lock:
+            if scope not in _kbs:
+                _kbs[scope] = KnowledgeBase(scope)
+    return _kbs[scope]
+
+
+def reload_kb(scope: str) -> KnowledgeBase:
+    """Rebuild after an upload/delete. The old index keeps serving live calls until the new one is ready."""
+    with _lock:
+        new = KnowledgeBase(scope)
+        _kbs[scope] = new
+        return new
 
 
 # ---------------------------------------------------------------------------

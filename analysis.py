@@ -156,8 +156,13 @@ Return ONLY JSON, written in ENGLISH even if the call was in another language:
  "outcome": "demo_booked | interested | needs_follow_up | handed_to_human | not_interested",
  "next_steps": ["concrete actions for the sales team"],
  "follow_up": "when and how to follow up",
- "agent_feedback": "one line: what the AI agent did well or should improve"
-}"""
+ "agent_feedback": "one line: what the AI agent did well or should improve",
+ "customer_summary": "2-3 friendly sentences written TO the customer (use 'you'): what you discussed and what was agreed. The customer will read this.",
+ "customer_next_steps": ["what happens next, written for the customer, e.g. 'Our consultant will call you on Tuesday'"]
+}
+Everything except customer_summary and customer_next_steps is INTERNAL (the customer never sees it).
+customer_summary and customer_next_steps must NOT contain scores, objections, sales tactics, internal notes,
+or any price/discount that was not clearly said to the customer on the call."""
 
 
 def end_call(session) -> dict:
@@ -165,14 +170,16 @@ def end_call(session) -> dict:
     crm = get_crm()
     convo = "\n".join(f"{t['who'].upper()}: {t['text']}" for t in session.transcript)
     if not session.transcript:
-        summary = {"summary": "Call ended before the customer spoke.", "outcome": "not_interested"}
+        summary = {"summary": "Call ended before the customer spoke.", "outcome": "not_interested",
+                   "customer_summary": "The call ended before we could talk."}
     else:
         try:
             summary, _ = llm.chat_json(SUMMARY_PROMPT, [{"role": "user", "content": convo}], temperature=0.2,
                                      prefer="gemini")
         except Exception as e:
             print(f"[analysis] Summary failed. Reason: {e}")
-            summary = {"summary": "Automatic summary unavailable. See transcript.", "outcome": "needs_follow_up"}
+            summary = {"summary": "Automatic summary unavailable. See transcript.", "outcome": "needs_follow_up",
+                       "customer_summary": "Thanks for calling Fortivex AI. Our team will follow up with you soon."}
 
     a = session.analysis or {}
     summary.update({

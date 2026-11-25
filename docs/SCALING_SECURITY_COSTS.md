@@ -47,7 +47,9 @@ Formula: `concurrent = calls_per_hour × call_minutes / 60`. **Scenario A runs o
 | Input validation | Pydantic: types, 600-char limit; phone normalised | + rate limiting per caller / IP, WAF |
 | Database | Parameterised SQL (`?`), allow-listed columns | + encryption at rest, least-privilege DB users, backups |
 | Web page | All text HTML-escaped (`esc()`) → no XSS | + CSP headers |
-| Dashboard access | **None (demo only)** | SSO / OAuth login, role-based access (agent, supervisor, admin), audit log |
+| Dashboard + admin access | `/admin.html` behind one `ADMIN_PASSWORD`: random 8-hour tokens, constant-time password check, 10 failed logins per 5 min limit; every `/api/admin/...` route (dashboard, uploads, search) requires the token; the customer call page has no admin access | SSO / OAuth login, per-user roles (agent, supervisor, admin), tokens in Redis, audit log |
+| Confidential documents | Two collections: **public** (`knowledge_base/`, the agent reads it) and **internal** (`knowledge_internal/`, git-ignored, admin search only). The agent never loads internal docs into its prompt, so it cannot leak them. Uploads default to internal; neither folder is served as static files | + per-tenant storage buckets, encryption at rest, document-level permissions |
+| File uploads | `.md` / `.txt` / `.pdf` only, 10 MB limit, file names sanitised (no `../` path tricks), PDFs stored as extracted text | + malware scan, OCR for scanned PDFs, upload audit trail |
 | Prompt injection | Agent can only use 5 tools; every tool validates arguments (e.g. slot must be truly free); LLM never touches the DB; RAG reads only approved company docs | + output filters, red-team test set, per-tenant tool permissions |
 | Hallucination | RAG with similarity threshold, sources shown, "never invent prices" rule, handoff when unsure | + automatic evaluation on a test set of real questions before every release |
 | PII | Phone/email stored locally | PII masking in logs, retention policy (e.g. delete recordings after 90 days), data residency in India |
@@ -105,7 +107,7 @@ Per 4-minute call, about 37k LLM input tokens and 3.4k output tokens (agent + pe
 - **Fit with Fortivex's portfolio:** sold as an add-on to **Fortivex CRM** (adapter already designed), and as a vertical product for **Medivex AI** (clinic appointment booking) and **Empowers Academy** (course enquiries and admissions).
 
 ## 7. Honest MVP limitations
-- No login on the dashboard; one tenant; sessions in memory; SQLite.
+- One shared admin password (no per-user accounts or roles); admin tokens and call sessions in memory; one tenant; SQLite.
 - Browser STT works in Chrome/Edge only; edge-tts is an unofficial free service (no SLA).
 - Free-tier LLM rate limits → fine for a demo, not for production traffic.
 - Turn latency ~2-4 s with the natural voice (no streaming yet).

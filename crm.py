@@ -9,6 +9,7 @@ ADAPTER PATTERN:
   same methods and change ONE line at the bottom (get_crm). Nothing else changes.
 """
 import json
+import secrets
 import sqlite3
 from datetime import datetime
 
@@ -32,6 +33,10 @@ class CRMAdapter:
     def book_appointment(self, lead_id: int, start: str, topic: str, link: str) -> dict: raise NotImplementedError
     def booked_times(self) -> set[str]: raise NotImplementedError
     def list_appointments(self) -> list[dict]: raise NotImplementedError
+    def portal_token(self, lead_id: int, reset: bool = False) -> str: raise NotImplementedError
+    def lead_by_portal_token(self, token: str) -> dict | None: raise NotImplementedError
+    def calls_for_lead(self, lead_id: int) -> list[dict]: raise NotImplementedError
+    def appointments_for_lead(self, lead_id: int) -> list[dict]: raise NotImplementedError
 
 
 # Columns a lead has. The agent and the analysis step fill these in during the call.
@@ -40,6 +45,15 @@ LEAD_FIELDS = [
     "budget", "authority", "timeline",          # BANT (Stage 4)
     "score", "status", "sentiment",
 ]
+
+
+def _lead(row) -> dict | None:
+    """A lead WITHOUT its portal_token: the secret link is only handed out by portal_token()."""
+    if row is None:
+        return None
+    d = dict(row)
+    d.pop("portal_token", None)
+    return d
 
 
 def _now() -> str:
@@ -72,16 +86,22 @@ class SQLiteCRM(CRMAdapter):
                 lead_id INTEGER, start TEXT, topic TEXT, link TEXT, created_at TEXT
             );
         """)
+        # Added later: the secret in each customer's private "my calls" link.
+        # ALTER TABLE upgrades databases created before this column existed.
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(leads)")}
+        if "portal_token" not in cols:
+            self.db.execute("ALTER TABLE leads ADD COLUMN portal_token TEXT")
+        self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_portal ON leads(portal_token)")
         self.db.commit()
 
     # --- leads ---
     def find_lead_by_phone(self, phone):
         row = self.db.execute("SELECT * FROM leads WHERE phone = ?", (phone,)).fetchone()
-        return dict(row) if row else None
+        return _lead(row)
 
     def get_lead(self, lead_id):
         row = self.db.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
-        return dict(row) if row else None
+        return _lead(row)
 
     def create_lead(self, phone):
         self.db.execute(
@@ -108,7 +128,7 @@ class SQLiteCRM(CRMAdapter):
 
     def list_leads(self):
         rows = self.db.execute("SELECT * FROM leads ORDER BY updated_at DESC").fetchall()
-        return [dict(r) for r in rows]
+        return [_lead(r) for r in rows]
 
     # --- calls ---
     def save_call(self, lead_id, transcript, summary):
@@ -160,6 +180,33 @@ class SQLiteCRM(CRMAdapter):
             SELECT appointments.*, leads.name, leads.phone FROM appointments
             LEFT JOIN leads ON leads.id = appointments.lead_id ORDER BY start
         """).fetchall()
+        return [dict(r) for r in rows]
+
+    # --- customer portal (each customer sees ONLY their own calls) ---
+    def portal_token(self, lead_id, reset=False):
+        """The secret in the customer's private link. reset=True makes the old link stop working."""
+        row = self.db.execute("SELECT portal_token FROM leads WHERE id = ?", (lead_id,)).fetchone()
+        if row is None:
+            raise KeyError(lead_id)
+        if row["portal_token"] and not reset:
+            return row["portal_token"]
+        token = secrets.token_urlsafe(24)      # 192 random bits: impossible to guess
+        self.db.execute("UPDATE leads SET portal_token = ? WHERE id = ?", (token, lead_id))
+        self.db.commit()
+        return token
+
+    def lead_by_portal_token(self, token):
+        if not token:
+            return None
+        row = self.db.execute("SELECT * FROM leads WHERE portal_token = ?", (token,)).fetchone()
+        return _lead(row)
+
+    def calls_for_lead(self, lead_id):
+        rows = self.db.execute("SELECT * FROM calls WHERE lead_id = ? ORDER BY id DESC", (lead_id,)).fetchall()
+        return [{**dict(r), "transcript": json.loads(r["transcript"]), "summary": json.loads(r["summary"])} for r in rows]
+
+    def appointments_for_lead(self, lead_id):
+        rows = self.db.execute("SELECT * FROM appointments WHERE lead_id = ? ORDER BY start", (lead_id,)).fetchall()
         return [dict(r) for r in rows]
 
 

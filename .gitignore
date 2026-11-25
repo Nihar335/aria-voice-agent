@@ -3,6 +3,8 @@
 __pycache__/
 *.pyc
 data/*.db
-data/rag_index.json
 .claude/
 learn/
+voice_samples/
+knowledge_internal/
+data/rag_index*.json

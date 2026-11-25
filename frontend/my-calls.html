@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Your Calls · Fortivex AI</title>
+<style>
+  :root {
+    --bg: #0b1020; --panel: #131a2e; --panel2: #1a2340; --line: #26314f;
+    --text: #e7ecf7; --muted: #8b97b5; --accent: #5b8cff; --accent2: #7c5cff;
+    --good: #2ecc8f; --bad: #ff5d6c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header .in { max-width: 760px; margin: 0 auto; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  header span { color: var(--muted); font-size: 14px; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h2 { font-size: 22px; margin: 0 0 4px; }
+  .muted { color: var(--muted); } .small { font-size: 13px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-top: 16px; }
+  .card h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .demo { border-color: var(--good); background: rgba(46,204,143,.08); }
+  .demo a, .card a { color: var(--accent); }
+  .date { font-weight: 600; }
+  ul { margin: 6px 0 0; padding-left: 20px; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--muted); }
+  .msg { padding: 8px 12px; border-radius: 12px; margin: 6px 0; max-width: 88%; white-space: pre-wrap; }
+  .msg.agent { background: var(--panel2); border: 1px solid var(--line); }
+  .msg.customer { background: var(--accent); color: #fff; margin-left: auto; }
+  .err { border-color: var(--bad); }
+</style>
+</head>
+<body>
+<header><div class="in"><h1>Fortivex AI</h1><span>Your conversations with Aria</span></div></header>
+<main>
+  <div id="out"><p class="muted">Loading…</p></div>
+  <p class="small muted" style="margin-top:28px">This page is private to you. Anyone with this link can see it, so please don't share it.
+    If you think someone else has it, ask Fortivex to reset it.</p>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const safeLink = (u) => /^https?:\/\//i.test(u || "") ? esc(u) : "#";
+const when = (iso) => { const d = new Date(iso); return isNaN(d) ? esc(iso) : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }); };
+
+// The secret is after '#', so it never leaves the browser in the URL; we send it in the request body.
+const token = decodeURIComponent(location.hash.slice(1));
+
+async function load() {
+  if (!token) { $("out").innerHTML = `<div class="card err">This page needs your private link. Please use the link Fortivex sent you.</div>`; return; }
+  const res = await fetch("/api/portal", { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify({ token }) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { $("out").innerHTML = `<div class="card err">${esc(d.detail || "Could not load your calls.")}</div>`; return; }
+
+  let html = `<h2>${d.name ? "Hi " + esc(d.name) + "!" : "Hello!"}</h2>
+    <p class="muted">Here is everything from your calls with Fortivex AI.</p>`;
+
+  const upcoming = d.appointments;
+  if (upcoming.length) html += upcoming.map(a => `<div class="card demo"><h3>Your demo</h3>
+      <div class="date">${esc(a.start)} IST</div><div>${esc(a.topic)}</div>
+      <a href="${safeLink(a.link)}" target="_blank" rel="noopener">Add to Google Calendar</a></div>`).join("");
+
+  html += d.calls.length ? d.calls.map(c => `<div class="card">
+      <h3>Call on ${when(c.date)}</h3>
+      <p style="margin:0">${c.summary ? esc(c.summary) : "<span class='muted'>A written summary isn't available for this call. You can read the full conversation below.</span>"}</p>
+      ${c.next_steps.length ? `<p style="margin:10px 0 0"><b>What happens next</b></p><ul>${c.next_steps.map(s => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}
+      <details><summary>Full conversation</summary>
+        ${c.transcript.map(t => `<div class="msg ${t.who === "agent" ? "agent" : "customer"}">${esc(t.text)}</div>`).join("")}
+      </details></div>`).join("")
+    : `<div class="card muted">No calls yet.</div>`;
+  $("out").innerHTML = html;
+}
+load().catch(() => $("out").innerHTML = `<div class="card err">Could not reach the server. Please try again later.</div>`);
+</script>
+</body>
+</html>

@@ -16,19 +16,23 @@ One full voice turn (the end-to-end workflow):
 import re
 import time
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import config
 import tts
+from admin import require_admin, router as admin_router
 from agent import Session, greeting, handle_turn, remember_reply
 from analysis import analyze_turn, end_call
 from crm import get_crm
+from portal import portal_path, router as portal_router
 from rag import get_kb
 
 app = FastAPI(title="Fortivex AI Sales Voice Agent")
+app.include_router(admin_router)   # /api/admin/... (password protected)
+app.include_router(portal_router)  # /api/portal (customer sees only their own calls)
 
 SESSIONS: dict[str, Session] = {}   # live calls (in memory for the MVP; Redis in production)
 LATENCIES: list[int] = []           # total ms per turn, for the dashboard
@@ -46,6 +50,7 @@ class Turn(BaseModel):
     session_id: str
     text: str = Field(..., min_length=1, max_length=600)
     natural_voice: bool = True     # False = skip edge-tts, the browser speaks instantly (lower latency)
+    language: str | None = Field(None, pattern="^(en|hi|hinglish|kn|te)$")   # language picked in the app
 
 
 class EndCall(BaseModel):
@@ -74,7 +79,7 @@ async def start_call(body: StartCall):
                              "language": session.language})
     voice = await tts.speak(text, session.language)
     lead = get_crm().get_lead(session.lead_id)
-    return {"session_id": session.id, "reply": text, "language": session.language,
+    return {"session_id": session.id, "reply": text, "reply_en": text, "language": session.language,
             "returning": session.returning, "lead": lead, "previous": session.previous, **voice}
 
 
@@ -84,14 +89,15 @@ async def call_turn(body: Turn, background: BackgroundTasks):
     t0 = time.perf_counter()
     try:
         # handle_turn is normal (blocking) code -> run it in a thread so the server stays responsive.
-        result = await run_in_threadpool(handle_turn, session, body.text.strip())
+        result = await run_in_threadpool(handle_turn, session, body.text.strip(), body.language)
     except Exception as e:
         print(f"[main] agent error: {e}")
         # Never leave the customer hanging: apologise and flag the lead for a human.
         session.handoff = True
         get_crm().update_lead(session.lead_id, {"status": "needs_human"})
         session.transcript.append({"who": "agent", "text": "[technical issue - handed to human]"})
-        result = {"reply": "Sorry, I'm having a small technical issue. Let me connect you to our team.",
+        sorry = "Sorry, I'm having a small technical issue. Let me connect you to our team."
+        result = {"reply": sorry, "reply_en": sorry, "customer_en": body.text.strip(),
                   "language": session.language, "sources": [], "thoughts": [], "events": [],
                   "handoff": True, "provider": "none", "latency": {"rag_ms": 0, "llm_ms": 0}}
     if body.natural_voice:
@@ -122,14 +128,16 @@ async def call_end(body: EndCall):
         await run_in_threadpool(analyze_turn, session)   # make sure we have a score
     summary = await run_in_threadpool(end_call, session)
     SESSIONS.pop(body.session_id, None)
-    return {"summary": summary, "lead": get_crm().get_lead(session.lead_id)}
+    # The caller's private link to come back and read their summaries any time.
+    return {"summary": summary, "lead": get_crm().get_lead(session.lead_id),
+            "portal_url": portal_path(session.lead_id)}
 
 
 # ---------------------------------------------------------------------------
-# Dashboard + health
+# Dashboard (admin only: it lists every lead's phone, transcript and summary) + health
 # ---------------------------------------------------------------------------
-@app.get("/api/dashboard")
-def dashboard():
+@app.get("/api/admin/dashboard")
+def dashboard(_: str = Depends(require_admin)):
     crm = get_crm()
     leads, calls, appts = crm.list_leads(), crm.list_calls(), crm.list_appointments()
     scores = [l["score"] or 0 for l in leads]

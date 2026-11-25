@@ -48,6 +48,9 @@ def remember_reply(session, decision: dict):
     session.history.append({"role": "assistant", "content": json.dumps(decision, ensure_ascii=False)})
     session.transcript.append({"who": "agent", "text": decision["reply"]})
 
+LANGUAGE_NAMES = {"en": "English", "hi": "Hindi (Devanagari script)", "hinglish": "Hinglish (Hindi in English letters)",
+                  "kn": "Kannada (Kannada script)", "te": "Telugu (Telugu script)"}
+
 SYSTEM_PROMPT = """You are "Aria", a friendly and smart sales voice agent for Fortivex AI, an AI and software company in Bengaluru.
 You are on a LIVE PHONE CALL. Today is {today} (IST).
 
@@ -69,12 +72,14 @@ LANGUAGE RULES:
 - Reply in the SAME language and style the customer uses:
   English -> "en"; Hindi -> Devanagari script, "hi"; Hinglish (Hindi in English letters) -> "hinglish";
   Kannada -> Kannada script, "kn"; Telugu -> Telugu script, "te".
-- If the customer switches language, you switch too.
+- The customer picked a language in the app: {chosen}. Reply in that language.
+  Only switch if the customer clearly speaks a different language.
 {memory}
 TOOLS YOU CAN USE:
 {tools}
 
 LANGUAGE DETECTED FROM THE CUSTOMER'S LAST MESSAGE: {detected}
+WRITE "reply" IN: {chosen} ("reply_en" is the only English field)
 
 COMPANY FACTS (retrieved for this question):
 {context}
@@ -84,7 +89,11 @@ RESPOND ONLY WITH JSON in exactly this shape (every single time, never plain tex
   "tool": null or "tool_name",
   "args": {{}},
   "reply": "what you say to the customer (empty string if you are calling a tool)",
-  "language": "en | hi | hinglish | kn | te"}}
+  "language": "en | hi | hinglish | kn | te",
+  "reply_en": "the reply translated to plain English",
+  "customer_en": "the customer's LAST message translated to plain English"}}
+For reply_en and customer_en: Hinglish, Hindi, Kannada and Telugu must ALWAYS be translated into real English sentences.
+Copy the text unchanged only when it is already proper English.
 """
 
 
@@ -92,7 +101,7 @@ class Session:
     """Everything we remember during one call."""
 
     def __init__(self, phone: str):
-        self.id = uuid.uuid4().hex[:8]
+        self.id = uuid.uuid4().hex   # full 128-bit id: can't be guessed to peek at someone else's live call
         self.phone = phone
         self.started = datetime.now(IST)
         crm = get_crm()
@@ -132,10 +141,10 @@ def greeting(session: Session) -> str:
         name = get_crm().get_lead(session.lead_id).get("name")
         return f"Hi{' ' + name if name else ''}, welcome back to Fortivex AI! This is Aria. How can I help you today?"
     return ("Hello! This is Aria from Fortivex AI. We help businesses save time and grow with AI. "
-            "You can talk to me in English, Hindi, Hinglish or Kannada. How can I help you today?")
+            "You can talk to me in English, Hindi, Hinglish, Kannada or Telugu. How can I help you today?")
 
 
-def handle_turn(session: Session, user_text: str) -> dict:
+def handle_turn(session: Session, user_text: str, chosen_language: str | None = None) -> dict:
     """Process one thing the customer said and return the agent's answer + details."""
     t0 = time.perf_counter()
     session.sources, session.events = [], []
@@ -156,10 +165,12 @@ def handle_turn(session: Session, user_text: str) -> dict:
         tools=TOOL_DESCRIPTIONS,
         context=format_context(hits),
         detected=detect_language(user_text),
+        chosen=LANGUAGE_NAMES.get(chosen_language or "", "not chosen - match the customer"),
     )
 
     # 2. Think -> act -> observe loop.
     llm_ms, provider, reply, language, thoughts = 0, "", "", session.language, []
+    reply_en, customer_en = "", ""
     for step in range(MAX_TOOL_STEPS + 1):
         decision, result = llm.chat_json(system, session.history, temperature=0.3)
         llm_ms += result.latency_ms
@@ -178,15 +189,20 @@ def handle_turn(session: Session, user_text: str) -> dict:
 
         reply = decision.get("reply") or "Sorry, could you say that again?"
         language = decision.get("language") or language
+        reply_en = decision.get("reply_en") or ""
+        customer_en = decision.get("customer_en") or ""
         break
 
     session.language = language
     remember_reply(session, {"thought": thoughts[-1] if thoughts else "", "tool": None, "args": {},
-                             "reply": reply, "language": language})
+                             "reply": reply, "language": language,
+                             "reply_en": reply_en, "customer_en": customer_en})
 
     return {
         "reply": reply,
         "language": language,
+        "reply_en": reply_en or reply,
+        "customer_en": customer_en or user_text,
         "sources": sorted(set(session.sources)),
         "thoughts": thoughts,
         "events": session.events,

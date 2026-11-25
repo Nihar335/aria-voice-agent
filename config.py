@@ -35,3 +35,11 @@ GEMINI_EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001")
 KNOWLEDGE_DIR = BASE_DIR / "knowledge_base"   # documents the agent can read (RAG)
 DATA_DIR = BASE_DIR / "data"                  # database + search index
 DATA_DIR.mkdir(exist_ok=True)
+
+# Confidential documents: only the admin page can search them, the voice agent never sees them.
+# Kept OUTSIDE knowledge_base/ and outside frontend/, and git-ignored.
+INTERNAL_KNOWLEDGE_DIR = BASE_DIR / "knowledge_internal"
+INTERNAL_KNOWLEDGE_DIR.mkdir(exist_ok=True)
+
+# --- Admin login for /admin.html (empty = admin page disabled) ---
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()

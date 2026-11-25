@@ -14,7 +14,7 @@
 | Lead qualification + sentiment | LLM extracts BANT facts + sentiment each turn (background); **score = transparent formula** (Need 35, Budget 25, Authority 20, Timeline 20); upset-customer alert |
 | RAG knowledge | Section chunks → Gemini embeddings → cosine search with a **minimum-relevance threshold** (no guessing); TF-IDF offline fallback; sources shown |
 | Appointment booking + CRM | Agentic tool loop: `check_availability` → `book_appointment` (slot validated by code) → Google Calendar link; CRM behind an **adapter** (SQLite today, Fortivex CRM = one class) |
-| Call summary + insights | End-of-call summary, outcome, objections, next steps; live cockpit (agent reasoning, tools, sources, latency) and insights dashboard |
+| Call summary + insights | End-of-call summary, outcome, objections, next steps; live cockpit (agent reasoning, tools, sources, latency); sales dashboard behind the admin login |
 
 **Architecture.** Browser ↔ FastAPI ↔ Agent (think → act → observe, max 3 tools) ↔ RAG / Tools / LLM gateway (automatic fallback across 5 models on Groq + Gemini) ↔ CRM adapter. Diagrams and the full end-to-end sequence: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -24,6 +24,6 @@
 
 **Scaling to 1,00,000 users.** 1 lakh calls/month ≈ **40 concurrent calls** at peak (small cluster, ~₹11.5 lakh/month total). 1 lakh calls/day ≈ **800 concurrent** → ~12 stateless autoscaled pods, Redis sessions, managed Postgres, queue-based analysis workers, provisioned LLM throughput with multi-provider failover. Target p95 response < 1.2 s via token-to-TTS streaming. Details: [`docs/SCALING_SECURITY_COSTS.md`](docs/SCALING_SECURITY_COSTS.md).
 
-**Security & compliance.** Secrets out of code; Pydantic validation and length limits; parameterised SQL with allow-listed columns; HTML escaping (no XSS); tool allow-list against prompt injection; grounding threshold against hallucination. Production: TLS, SSO + roles, PII masking, India data residency, DPDP Act 2023 consent, AI/recording disclosure, TRAI DND rules for outbound.
+**Security & compliance.** Password-protected admin page (sales dashboard + knowledge uploads; token sessions, login rate limit); knowledge split into **public** (agent may say it) and **internal** (admin-only, never in the agent's prompt, so it can't leak); secrets out of code; Pydantic validation and length limits; parameterised SQL with allow-listed columns; HTML escaping (no XSS); tool allow-list against prompt injection; grounding threshold against hallucination. Production: TLS, SSO + roles, PII masking, India data residency, DPDP Act 2023 consent, AI/recording disclosure, TRAI DND rules for outbound.
 
-**Limitations & next steps.** MVP has no dashboard login, single tenant, in-memory sessions, ~2-4 s turns with the natural voice. Next: real phone number via Exotel, streaming pipeline, WhatsApp confirmations, Fortivex CRM adapter, an evaluation set of 100 real questions for regression testing.
+**Limitations & next steps.** MVP has a single shared admin password (no per-user roles), single tenant, in-memory sessions and admin tokens, ~2-4 s turns with the natural voice. Next: real phone number via Exotel, streaming pipeline, WhatsApp confirmations, Fortivex CRM adapter, an evaluation set of 100 real questions for regression testing.

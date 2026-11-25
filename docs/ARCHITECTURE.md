@@ -6,12 +6,14 @@
 flowchart LR
     subgraph Browser["Browser - frontend/index.html"]
         MIC["🎙️ Chrome Speech-to-Text<br/>en-IN · hi-IN · kn-IN · te-IN"]
-        UI["Call screen +<br/>Live cockpit +<br/>Insights dashboard"]
+        UI["Call screen +<br/>Live cockpit<br/>(index.html)"]
+        ADM["Admin page (admin.html)<br/>login · sales dashboard ·<br/>knowledge upload + search"]
         SPK["🔊 Audio player<br/>(browser voice fallback)"]
     end
 
     subgraph Server["FastAPI server - main.py"]
-        API["REST API<br/>/api/call/start · turn · live · end<br/>/api/dashboard · /api/health"]
+        API["REST API<br/>/api/call/start · turn · live · end<br/>/api/health"]
+        ADMIN["Admin API - admin.py<br/>password login → token<br/>/api/admin/dashboard · documents · search"]
         AGENT["Agent brain - agent.py<br/>think → act → observe loop<br/>(max 3 tool steps)"]
         RAG["RAG - rag.py<br/>section chunks + Gemini embeddings<br/>TF-IDF offline fallback"]
         TOOLS["Tools - tools.py<br/>save_lead_info · check_availability<br/>book_appointment · handoff_to_human<br/>search_knowledge"]
@@ -21,7 +23,8 @@ flowchart LR
         CRM["CRM adapter - crm.py<br/>SQLiteCRM (today)<br/>FortivexCRMAdapter (plug-in)"]
     end
 
-    KB[("knowledge_base/*.md<br/>services · pricing · FAQ · objections")]
+    KB[("knowledge_base/ (public)<br/>services · pricing · FAQ · objections")]
+    KBI[("knowledge_internal/ (confidential)<br/>admin-only, never sent to the agent")]
     DB[("SQLite<br/>leads · calls · appointments")]
     GEM["Google Gemini API<br/>chat backup + embeddings"]
     GROQ["Groq API (primary)<br/>Qwen 3.8 · GPT-OSS 120B/20B"]
@@ -47,6 +50,10 @@ flowchart LR
     ANALYSIS --> CRM
     CRM --> DB
     UI -->|poll every 1.2 s| API
+    ADM -->|Bearer token| ADMIN
+    ADMIN -->|upload / delete → re-index| RAG
+    ADMIN -->|leads · calls · demos| CRM
+    RAG -->|admin search only| KBI
 ```
 
 ### Design principles
@@ -99,7 +106,7 @@ sequenceDiagram
     N->>T: update lead score / status
     B->>S: GET /api/call/{id}/live (polling)
     S-->>B: score, sentiment, BANT, insights → cockpit
-    Note over B,S: On "End call": POST /api/call/end → summary + next steps saved in CRM → dashboard.<br/>Next call from the same number loads this summary as memory.
+    Note over B,S: On "End call": POST /api/call/end → summary + next steps saved in CRM → sales dashboard (admin page).<br/>Next call from the same number loads this summary as memory.
 ```
 
 ## 3. Production architecture (for 1,00,000+ users)
@@ -118,7 +125,7 @@ flowchart LR
         REDIS[("Redis<br/>live call sessions,<br/>LLM response cache")]
         PG[("PostgreSQL + pgvector<br/>multi-tenant CRM + RAG")]
         OBJ[("Object storage<br/>recordings, transcripts")]
-        DASH["Dashboard app<br/>(SSO, role-based access)"]
+        DASH["Admin + dashboard app<br/>(SSO, role-based access,<br/>knowledge management)"]
         OBS["Observability<br/>OpenTelemetry · Grafana ·<br/>LLM tracing · alerts"]
     end
 
@@ -153,7 +160,8 @@ What changes from MVP to production, and what does **not**:
 | Audio in/out | Browser STT, edge-tts, HTTP per turn | Telephony WebSocket, streaming STT/TTS | new gateway service; agent unchanged |
 | Sessions | Python dict | Redis | `SESSIONS` → Redis client |
 | CRM | SQLite | PostgreSQL / Fortivex CRM API | one adapter class in `crm.py` |
-| RAG index | NumPy in memory | pgvector, one namespace per client | inside `rag.search()` only |
+| RAG index | NumPy in memory, public + internal collections | pgvector, one namespace per client and per collection | inside `rag.search()` only |
+| Admin auth | One password, in-memory tokens | SSO + roles, tokens in Redis | `require_admin()` in `admin.py` |
 | LLM | Free-tier keys | Vertex AI / paid tiers, quota pools | config only |
 | Analysis | FastAPI background task | queue + worker pool | move function call to a worker |
 

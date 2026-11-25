@@ -10,3 +10,5 @@ groq==0.15.0
 edge-tts==7.3.1
 # Maths for RAG similarity search
 numpy==2.2.1
+# Reads text out of uploaded PDF files (admin page)
+pypdf==5.1.0
