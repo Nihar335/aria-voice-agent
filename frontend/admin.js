@@ -1,268 +1,8 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex, nofollow">
-<title>Knowledge Admin · Fortivex</title>
-<style>
-  :root {
-    --bg: #0b1020; --panel: #131a2e; --panel2: #1a2340; --line: #26314f;
-    --text: #e7ecf7; --muted: #8b97b5; --accent: #5b8cff; --accent2: #7c5cff;
-    --good: #2ecc8f; --warn: #f5b74e; --bad: #ff5d6c;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  header { display: flex; align-items: center; gap: 16px; padding: 14px 24px;
-           border-bottom: 1px solid var(--line); background: var(--panel); }
-  header h1 { font-size: 17px; margin: 0; }
-  header h1 span { color: var(--muted); font-weight: 400; }
-  header .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-  main { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
-  .hidden { display: none !important; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
-  .card h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-  .muted { color: var(--muted); } .small { font-size: 12px; }
-  button { font: inherit; cursor: pointer; }
-  button.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff;
-                   border: 0; padding: 10px 18px; border-radius: 10px; font-weight: 600; }
-  button.primary:disabled { opacity: .5; cursor: wait; }
-  button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
-                 padding: 7px 12px; border-radius: 10px; }
-  button.del { background: none; color: var(--bad); border: 1px solid var(--line); padding: 4px 10px; border-radius: 8px; }
-  input, select { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
-                  border-radius: 10px; padding: 9px 12px; font: inherit; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } main { padding: 16px; } header { padding: 12px 16px; } }
-  @media (max-width: 600px) { #mode { display: none; } }
-  .stack > * + * { margin-top: 18px; }
-
-  #login { max-width: 380px; margin: 12vh auto; }
-  #login form { display: flex; flex-direction: column; gap: 10px; }
-  .err { color: var(--bad); font-size: 13px; min-height: 1.2em; }
-  .pw { display: flex; gap: 8px; }
-  .pw input { flex: 1; min-width: 0; }
-  /* Hide Edge's own eye icon (it disappears for autofilled values); we use our Show button instead. */
-  .pw input::-ms-reveal, .pw input::-ms-clear { display: none; }
-
-  .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px; text-align: center; cursor: pointer; }
-  .drop.over { border-color: var(--accent); background: rgba(91,140,255,.08); }
-  .scopes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
-  .scope { display: block; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; }
-  .scope input { margin-right: 6px; }
-  .scope:has(input:checked) { border-color: var(--accent); background: rgba(91,140,255,.08); }
-  .scope.internal:has(input:checked) { border-color: var(--warn); background: rgba(245,183,78,.08); }
-  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-  .badge.public { background: rgba(46,204,143,.15); color: var(--good); }
-  .badge.internal { background: rgba(245,183,78,.15); color: var(--warn); }
-
-  table { width: 100%; border-collapse: collapse; }
-  td, th { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
-  th { font-size: 12px; color: var(--muted); font-weight: 500; }
-  td.name { word-break: break-all; }
-  td.name a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); cursor: pointer; }
-  td.num, th.num { text-align: right; white-space: nowrap; }
-
-  .searchbar { display: flex; gap: 8px; flex-wrap: wrap; }
-  .searchbar input { flex: 1; min-width: 200px; }
-  .hit { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 10px; background: var(--panel2); }
-  .hit .src { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
-  .hit pre, #previewText { white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; font: 13px/1.5 inherit; }
-  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel2);
-           border: 1px solid var(--line); padding: 10px 16px; border-radius: 10px; max-width: calc(100% - 32px); }
-  #toast.bad { border-color: var(--bad); }
-  .tabs { display: flex; gap: 6px; }
-  .tabs button { background: none; border: 1px solid var(--line); color: var(--muted); padding: 6px 12px; border-radius: 8px; }
-  .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-
-  /* Sales dashboard */
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
-  .stat .n { font-size: 28px; font-weight: 700; }
-  .grid2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
-  @media (max-width: 1000px) { .grid2 { grid-template-columns: 1fr; } }
-  .chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px;
-          background: var(--panel2); border: 1px solid var(--line); margin: 2px 4px 2px 0; }
-  .tier { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; text-transform: uppercase; }
-  .tier.hot { background: var(--bad); } .tier.warm { background: var(--warn); color: #222; } .tier.cold { background: var(--line); }
-  .summary-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; background: var(--panel2); }
-  .summary-card a { color: var(--accent); }
-  .scroll-x { overflow-x: auto; }
-  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 14px;
-           width: min(820px, calc(100% - 32px)); max-height: 80vh; padding: 16px; }
-  dialog::backdrop { background: rgba(0,0,0,.6); }
-
-  /* Sign-in */
-  .google { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 14px;
-            border-radius: 10px; background: #fff; color: #1f1f1f; font-weight: 600; text-decoration: none; }
-  .or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 14px 0 10px; }
-  .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
-  .role { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--panel2);
-          border: 1px solid var(--line); text-transform: uppercase; letter-spacing: .04em; }
-
-  /* Quality tab */
-  .bar { height: 8px; border-radius: 999px; background: var(--panel2); overflow: hidden; }
-  .bar > i { display: block; height: 100%; background: var(--good); }
-  .pass { color: var(--good); font-weight: 700; } .fail { color: var(--bad); font-weight: 700; }
-  tr.click { cursor: pointer; } tr.click:hover td { background: var(--panel2); }
-  .span { display: grid; grid-template-columns: 110px 1fr 70px; gap: 8px; align-items: center; font-size: 12px; margin: 3px 0; }
-  .span .track { position: relative; height: 10px; background: var(--panel2); border-radius: 4px; }
-  .span .track i { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--accent); min-width: 2px; }
-  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 4px 10px; font-size: 13px; }
-  .kv b { color: var(--muted); font-weight: 500; }
-  pre.json { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--panel2);
-             padding: 8px; border-radius: 8px; max-height: 240px; overflow: auto; }
-  .userform { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .userform input:not([type=checkbox]) { flex: 1; min-width: 180px; }
-</style>
-</head>
-<body>
-<header>
-  <h1>Fortivex <span>· Admin</span></h1>
-  <div class="right">
-    <span id="mode" class="small muted"></span>
-    <div id="tabs" class="tabs hidden">
-      <button id="tab-kb" class="active" onclick="showTab('kb')">Knowledge</button>
-      <button id="tab-dash" onclick="showTab('dash')">Sales dashboard</button>
-      <button id="tab-quality" onclick="showTab('quality')">Quality</button>
-      <button id="tab-users" onclick="showTab('users')">Users</button>
-    </div>
-    <span id="who" class="small muted"></span>
-    <button id="logout" class="ghost hidden">Log out</button>
-  </div>
-</header>
-
-<main>
-  <!-- ---------------- Login ---------------- -->
-  <section id="login" class="card">
-    <h3>Staff sign-in</h3>
-    <a id="googleBtn" class="google hidden" href="/api/auth/google/start">
-      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
-      Sign in with Google
-    </a>
-    <div id="orLine" class="or hidden"><span>or break-glass password</span></div>
-    <form id="loginForm">
-      <div class="pw">
-        <input id="password" type="password" placeholder="Admin password" autocomplete="off" spellcheck="false" required>
-        <button type="button" id="pwToggle" class="ghost" aria-label="Show password">Show</button>
-      </div>
-      <button class="primary" type="submit">Log in</button>
-      <div id="loginErr" class="err"></div>
-    </form>
-    <p id="pwHint" class="small muted">The password is <code>ADMIN_PASSWORD</code> in the server's <code>.env</code> file. It signs you in as admin.</p>
-  </section>
-
-  <!-- ---------------- Admin app ---------------- -->
-  <section id="app" class="hidden stack">
-    <div class="card">
-      <h3>Upload a document</h3>
-      <div id="drop" class="drop">
-        <b>Drop a file here</b> or click to choose<br>
-        <span class="small muted">.pdf, .md or .txt · up to <span id="maxMb">50</span> MB · same name replaces the old version</span>
-      </div>
-      <input id="file" type="file" accept=".pdf,.md,.txt" class="hidden">
-      <div class="scopes">
-        <label class="scope internal">
-          <input type="radio" name="scope" value="internal" checked>
-          <span class="badge internal">INTERNAL</span> Confidential
-          <div class="small muted">Only admins can search it. The voice agent never reads it, so customers can't hear it.</div>
-        </label>
-        <label class="scope">
-          <input type="radio" name="scope" value="public">
-          <span class="badge public">PUBLIC</span> Agent knowledge
-          <div class="small muted">The agent uses it to answer customers. Anything here may be said on a call.</div>
-        </label>
-      </div>
-      <div id="queue" class="small"></div>
-    </div>
-
-    <div class="grid">
-      <div class="card">
-        <h3><span class="badge public">PUBLIC</span> &nbsp;Agent can use</h3>
-        <div id="list-public"></div>
-      </div>
-      <div class="card" id="internalCard">
-        <h3><span class="badge internal">INTERNAL</span> &nbsp;Confidential, managers + admins</h3>
-        <div id="list-internal"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>Search the knowledge base</h3>
-      <form id="searchForm" class="searchbar">
-        <input id="q" placeholder="e.g. What is our discount policy?" required maxlength="500">
-        <select id="searchScope">
-          <option value="public">Public (what the agent finds)</option>
-          <option value="internal">Internal (confidential)</option>
-        </select>
-        <button class="primary" type="submit">Search</button>
-      </form>
-      <div id="hits"></div>
-    </div>
-  </section>
-
-  <!-- ---------------- Sales dashboard (leads, calls, demos) ---------------- -->
-  <section id="dash" class="hidden stack">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <h2 style="margin:0;font-size:18px">Sales insights</h2>
-      <button class="ghost" onclick="loadDashboard()">↻ Refresh</button>
-    </div>
-    <div class="stats" id="stats"></div>
-    <div class="grid2">
-      <div class="card"><h3>Leads (CRM)</h3><div id="leads" class="scroll-x"></div></div>
-      <div class="card"><h3>Booked demos</h3><div id="appts"></div></div>
-    </div>
-    <div class="card"><h3>Call summaries</h3><div id="calls"></div></div>
-  </section>
-
-  <!-- ---------------- Quality: observability + evals ---------------- -->
-  <section id="quality" class="hidden stack">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-      <h2 style="margin:0;font-size:18px">Quality · last 500 turns</h2>
-      <button class="ghost" onclick="loadQuality()">↻ Refresh</button>
-    </div>
-    <div class="stats" id="qStats"></div>
-    <div class="grid2">
-      <div class="card"><h3>Evals (golden conversations)</h3><div id="qEval"></div></div>
-      <div class="card"><h3>Routing · models · guardrails</h3><div id="qMix"></div></div>
-    </div>
-    <div class="card"><h3>Recent turns (click for the trace)</h3><div id="qTraces" class="scroll-x"></div></div>
-    <div class="card" id="auditCard"><h3>Audit log</h3><div id="qAudit" class="scroll-x"></div></div>
-  </section>
-
-  <!-- ---------------- Users (RBAC) ---------------- -->
-  <section id="users" class="hidden stack">
-    <div class="card">
-      <h3>Add or change a user</h3>
-      <form id="userForm" class="userform">
-        <input id="uEmail" type="email" placeholder="name@company.com" required>
-        <input id="uName" placeholder="Name (optional)">
-        <select id="uRole"><option value="sales_rep">sales_rep</option><option value="manager">manager</option>
-          <option value="viewer">viewer</option><option value="admin">admin</option></select>
-        <label class="small"><input id="uActive" type="checkbox" checked> active</label>
-        <button class="primary" type="submit">Save</button>
-      </form>
-      <p class="small muted">People sign in with Google using this email. Unticking "active" removes their access immediately.</p>
-    </div>
-    <div class="card"><h3>Users</h3><div id="uList" class="scroll-x"></div></div>
-    <div class="card"><h3>What each role can do</h3><div id="uRoles"></div></div>
-  </section>
-</main>
-
-<dialog id="preview">
-  <div style="display:flex;align-items:center;gap:8px">
-    <b id="previewName"></b><span id="previewBadge"></span>
-    <button class="ghost" style="margin-left:auto" onclick="document.getElementById('preview').close()">Close</button>
-  </div>
-  <pre id="previewText"></pre>
-</dialog>
-<div id="toast" class="hidden"></div>
-
-<script>
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
-  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
+// ============================================================================
+// admin.js - the ADMIN role (after the password): Live call, Knowledge, Sales dashboard,
+// Quality and Users tabs. Uses $ / esc from call-core.js; adminApi() adds the login token.
+// The SERVER enforces every permission; the page only hides what you can't use.
+// ============================================================================
 // The token lives only in this browser tab (sessionStorage): closing the tab logs you out.
 let token = null;
 try { token = sessionStorage.getItem("adminToken"); } catch (e) {}
@@ -271,7 +11,7 @@ function saveToken(t) {
   try { t ? sessionStorage.setItem("adminToken", t) : sessionStorage.removeItem("adminToken"); } catch (e) {}
 }
 
-async function api(path, { method = "GET", body } = {}) {
+async function adminApi(path, { method = "GET", body } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = "Bearer " + token;
   const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
@@ -291,17 +31,26 @@ function toast(msg, bad = false) {
 // The server enforces every permission; the page only hides what you can't use.
 let me = null;
 const can = (p) => !!me && me.permissions.includes(p);
-const TABS = { kb: "docs:read", dash: "dashboard:read", quality: "quality:read", users: "users:manage" };
-const SECTION = { kb: "app", dash: "dash", quality: "quality", users: "users" };
+const TABS = { live: "dashboard:read", kb: "docs:read", dash: "dashboard:read", quality: "quality:read", users: "users:manage" };
+const SECTION = { live: "live", kb: "app", dash: "dash", quality: "quality", users: "users" };
+const ADMIN_PARTS = ["live", "app", "dash", "quality", "users", "logout", "tabs", "health", "mode"];
+
+function hideAdmin() {
+  for (const id of ADMIN_PARTS) $(id).classList.add("hidden");
+  $("who").textContent = "";
+}
 
 function showLogin(msg = "") {
   me = null;
-  for (const id of ["app", "dash", "quality", "users", "logout", "tabs"]) $(id).classList.add("hidden");
+  if (currentRole !== "admin") return;     // a 401 while the customer view is open: nothing to show
+  if (sessionId) endCall();
+  hideAdmin();
   $("login").classList.remove("hidden");
+  setTimeout(() => $("password").focus(), 0);
   $("loginErr").textContent = msg; $("mode").textContent = ""; $("who").textContent = "";
   // wipe customer data from the page
   for (const id of ["stats", "leads", "appts", "calls", "qStats", "qEval", "qMix", "qTraces", "qAudit", "uList"]) $(id).innerHTML = "";
-  api("/api/auth/config").then((c) => {
+  adminApi("/api/auth/config").then((c) => {
     $("googleBtn").classList.toggle("hidden", !c.google);
     $("loginForm").classList.toggle("hidden", !c.password);
     $("pwHint").classList.toggle("hidden", !c.password);
@@ -310,16 +59,16 @@ function showLogin(msg = "") {
   }).catch(() => {});
 }
 async function showApp() {
-  me = await api("/api/auth/me");
+  me = await adminApi("/api/auth/me");
   $("who").innerHTML = `${esc(me.name || me.email)} <span class="role">${esc(me.role)}</span>`;
   $("login").classList.add("hidden"); $("logout").classList.remove("hidden"); $("tabs").classList.remove("hidden");
   for (const [tab, perm] of Object.entries(TABS)) $("tab-" + tab).classList.toggle("hidden", !can(perm));
   // Knowledge tab details
-  document.querySelector("#app > .card").classList.toggle("hidden", !can("docs:write"));        // upload box
+  $("uploadCard").classList.toggle("hidden", !can("docs:write"));        // upload box
   $("searchScope").querySelector("option[value=internal]").hidden = !can("search:internal");
   $("auditCard").classList.toggle("hidden", !can("audit:read"));
-  let tab = "kb";
-  try { tab = sessionStorage.getItem("adminTab") || "kb"; } catch (e) {}
+  let tab = "live";
+  try { tab = sessionStorage.getItem("adminTab") || "live"; } catch (e) {}
   if (!can(TABS[tab])) tab = Object.keys(TABS).find((t) => can(TABS[t])) || "dash";
   showTab(tab);
 }
@@ -329,14 +78,15 @@ function showTab(name) {
     $("tab-" + t).classList.toggle("active", name === t);
   }
   $("mode").classList.toggle("hidden", name !== "kb");
+  $("health").classList.toggle("hidden", name !== "live");
   try { sessionStorage.setItem("adminTab", name); } catch (e) {}
-  const load = { kb: loadDocs, dash: loadDashboard, quality: loadQuality, users: loadUsers }[name];
+  const load = { live: async () => loadHealth(), kb: loadDocs, dash: loadDashboard, quality: loadQuality, users: loadUsers }[name];
   load().catch((err) => toast(err.message, true));
 }
 
 // ---------------- Sales dashboard ----------------
 async function loadDashboard() {
-  const d = await api("/api/admin/dashboard");
+  const d = await adminApi("/api/admin/dashboard");
   const s = d.stats;
   const stat = (n, label) => `<div class="card stat"><div class="n">${n}</div><div class="muted">${label}</div></div>`;
   $("stats").innerHTML = stat(s.calls, "Calls handled") + stat(s.leads, "Leads in CRM") + stat(s.hot_leads, "Hot leads (≥70)") +
@@ -385,7 +135,7 @@ $("loginForm").addEventListener("submit", async (e) => {
   $("loginErr").textContent = "";
   try {
     // trim(): a pasted password often carries a space or line break at the end.
-    const r = await api("/api/auth/login", { method: "POST", body: { password: $("password").value.trim() } });
+    const r = await adminApi("/api/auth/login", { method: "POST", body: { password: $("password").value.trim() } });
     saveToken(r.token); $("password").value = ""; $("password").type = "password"; $("pwToggle").textContent = "Show"; showApp();
   } catch (err) {
     $("loginErr").textContent = err.message === "Wrong password"
@@ -393,14 +143,18 @@ $("loginForm").addEventListener("submit", async (e) => {
       : err.message;
   }
 });
-$("logout").onclick = async () => { try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {} saveToken(null); showLogin(); };
+$("logout").onclick = async () => {
+  if (sessionId) await endCall();
+  try { await adminApi("/api/auth/logout", { method: "POST" }); } catch (e) {}
+  saveToken(null); goRole("");
+};
 
 // ---------------- Document lists ----------------
 let maxUploadMb = 50;
 const kb = (n) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB";
 
 async function loadDocs() {
-  const r = await api("/api/admin/documents");
+  const r = await adminApi("/api/admin/documents");
   maxUploadMb = r.max_upload_mb || maxUploadMb;     // the server's MAX_UPLOAD_MB setting
   $("maxMb").textContent = maxUploadMb;
   $("mode").textContent = `Search: public ${r.search_mode.public} · internal ${r.search_mode.internal}`;
@@ -425,7 +179,7 @@ document.addEventListener("click", async (e) => {
     const id = (link || reset).dataset.link || reset.dataset.reset;
     if (reset && !confirm("Make a new link for this customer? The old link will stop working.")) return;
     try {
-      const r = await api(`/api/admin/leads/${encodeURIComponent(id)}/portal-link`, { method: "POST", body: { reset: !!reset } });
+      const r = await adminApi(`/api/admin/leads/${encodeURIComponent(id)}/portal-link`, { method: "POST", body: { reset: !!reset } });
       const url = location.origin + r.path;
       try { await navigator.clipboard.writeText(url); toast(reset ? "New link copied. The old one no longer works." : "Customer link copied"); }
       catch (err) { prompt("Copy the customer's link:", url); }
@@ -436,13 +190,13 @@ document.addEventListener("click", async (e) => {
     const { del: name, scope } = del.dataset;
     if (!confirm(`Delete ${name} from ${scope}? This can't be undone.`)) return;
     try {
-      await api(`/api/admin/documents/${scope}/${encodeURIComponent(name)}`, { method: "DELETE" });
+      await adminApi(`/api/admin/documents/${scope}/${encodeURIComponent(name)}`, { method: "DELETE" });
       toast(`Deleted ${name}`); loadDocs();
     } catch (err) { toast(err.message, true); }
   } else if (view) {
     const { view: name, scope } = view.dataset;
     try {
-      const r = await api(`/api/admin/documents/${scope}/${encodeURIComponent(name)}`);
+      const r = await adminApi(`/api/admin/documents/${scope}/${encodeURIComponent(name)}`);
       $("previewName").textContent = r.name;
       $("previewBadge").innerHTML = `<span class="badge ${scope}">${scope.toUpperCase()}</span>`;
       $("previewText").textContent = r.text;
@@ -476,7 +230,7 @@ async function uploadFiles(files) {
     $("queue").prepend(line);
     try {
       if (f.size > maxUploadMb * 1024 * 1024) throw new Error(`larger than ${maxUploadMb} MB`);
-      const r = await api("/api/admin/documents", { method: "POST",
+      const r = await adminApi("/api/admin/documents", { method: "POST",
         body: { filename: f.name, content_b64: await toBase64(f), scope } });
       line.textContent = `✅ ${r.name} → ${r.scope} (${r.chunks} chunks${r.replaced ? ", replaced old version" : ""})`;
     } catch (err) {
@@ -491,7 +245,7 @@ $("searchForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("hits").innerHTML = `<p class="muted small">Searching…</p>`;
   try {
-    const r = await api("/api/admin/search", { method: "POST", body: { query: $("q").value, scope: $("searchScope").value } });
+    const r = await adminApi("/api/admin/search", { method: "POST", body: { query: $("q").value, scope: $("searchScope").value } });
     $("hits").innerHTML = r.hits.length ? r.hits.map(h => `<div class="hit">
         <div class="src"><span>${esc(h.source)}</span><span>score ${h.score}</span></div>
         <pre>${esc(h.text)}</pre></div>`).join("")
@@ -505,7 +259,7 @@ const chips = (obj) => Object.entries(obj || {}).sort((a, b) => b[1] - a[1])
   .map(([k, v]) => `<span class="chip">${esc(k)} · ${esc(v)}</span>`).join("") || "<span class='muted small'>none yet</span>";
 
 async function loadQuality() {
-  const q = await api("/api/admin/quality");
+  const q = await adminApi("/api/admin/quality");
   const t = q.traces, e = q.eval;
   const stat = (n, label) => `<div class="card stat"><div class="n">${n}</div><div class="muted">${label}</div></div>`;
   $("qStats").innerHTML = stat(t.turns, "Turns traced") + stat(t.p50_ms + " ms", "p50 response") + stat(t.p95_ms + " ms", "p95 response") +
@@ -529,7 +283,7 @@ async function loadQuality() {
     <div class="small muted" style="margin-top:8px">Prompt versions</div><div>${chips(t.prompt_versions)}</div>
     <div class="small muted" style="margin-top:8px">Answer cache (since restart): ${q.cache.entries} entries · ${q.cache.hits} hits · ${q.cache.semantic_hits} semantic</div>`;
 
-  const tr = await api("/api/admin/traces?limit=40");
+  const tr = await adminApi("/api/admin/traces?limit=40");
   $("qTraces").innerHTML = tr.traces.length ? `<table><tr><th>Time</th><th>Customer said</th><th>Route</th><th>Model</th><th class="num">ms</th><th class="num">Tokens</th><th>Guard</th></tr>
     ${tr.traces.map(x => `<tr class="click" data-trace="${esc(x.id)}"><td class="muted">${esc((x.created_at || "").slice(11))}</td>
       <td>${esc((x.input || "").slice(0, 60))}</td><td><span class="chip">${esc(x.route)}</span>${x.cache_hit ? '<span class="chip">cache</span>' : ""}</td>
@@ -539,7 +293,7 @@ async function loadQuality() {
     : "<p class='muted'>No turns yet. Make a call on the main page.</p>";
 
   if (can("audit:read")) {
-    const a = await api("/api/admin/audit?limit=50");
+    const a = await adminApi("/api/admin/audit?limit=50");
     $("qAudit").innerHTML = a.audit.length ? `<table><tr><th>Time</th><th>Who</th><th>Role</th><th>Action</th><th>Detail</th></tr>
       ${a.audit.map(x => `<tr><td class="muted">${esc(x.created_at)}</td><td>${esc(x.actor)}</td><td>${esc(x.role)}</td>
         <td><span class="chip">${esc(x.action)}</span></td><td class="small">${esc(x.detail)}</td></tr>`).join("")}</table>`
@@ -548,7 +302,7 @@ async function loadQuality() {
 }
 
 async function showTrace(id) {
-  const t = await api(`/api/admin/traces/${encodeURIComponent(id)}`);
+  const t = await adminApi(`/api/admin/traces/${encodeURIComponent(id)}`);
   const total = Math.max(t.total_ms, 1);
   let offset = 0;
   const spans = t.spans.map(s => {
@@ -578,7 +332,7 @@ document.addEventListener("click", (e) => {
 // ---------------- Users (admin only) ----------------
 let userRows = [];
 async function loadUsers() {
-  const r = await api("/api/admin/users");
+  const r = await adminApi("/api/admin/users");
   userRows = r.users;
   $("uList").innerHTML = r.users.length ? `<table><tr><th>Email</th><th>Name</th><th>Role</th><th>Active</th><th>Last sign-in</th><th></th></tr>
     ${r.users.map((u, i) => `<tr><td>${esc(u.email)}</td><td>${esc(u.name || "")}</td><td><span class="role">${esc(u.role)}</span></td>
@@ -598,21 +352,8 @@ document.addEventListener("click", (e) => {
 $("userForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
-    await api("/api/admin/users", { method: "POST", body: { email: $("uEmail").value.trim(), name: $("uName").value.trim(),
+    await adminApi("/api/admin/users", { method: "POST", body: { email: $("uEmail").value.trim(), name: $("uName").value.trim(),
       role: $("uRole").value, active: $("uActive").checked } });
     toast("User saved"); $("userForm").reset(); $("uActive").checked = true; loadUsers();
   } catch (err) { toast(err.message, true); }
 });
-
-// ---------------- Start ----------------
-// Google sign-in comes back as /admin.html#token=... (or #error=...). The fragment never reaches a server.
-(function start() {
-  const h = new URLSearchParams(location.hash.slice(1));
-  if (h.get("token")) saveToken(h.get("token"));
-  if (h.get("token") || h.get("error")) history.replaceState(null, "", location.pathname);
-  if (h.get("error")) { saveToken(null); showLogin(h.get("error")); return; }
-  token ? showApp().catch(() => {}) : showLogin();
-})();
-</script>
-</body>
-</html>

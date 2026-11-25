@@ -1,11 +1,11 @@
 """
-admin.py - the admin API behind /admin.html: upload, list, delete and test-search
+admin.py - the admin API behind the admin view of the page: upload, list, delete and test-search
 knowledge files.
 
 Who sees what (RBAC, layers/rbac.py):
-  client page (index.html) -> talks to the voice agent, which reads ONLY the public
+  customer view (index.html) -> talks to the voice agent, which reads ONLY the public
                               knowledge base. No /api/admin/... call works without a token.
-  admin page  (admin.html) -> staff sign in with Google (or the break-glass ADMIN_PASSWORD).
+  admin view  (index.html -> Admin) -> staff sign in with Google (or the break-glass ADMIN_PASSWORD).
                               Each route checks a permission: sales reps can't open confidential
                               files, only managers/admins can upload or delete, only admins manage users.
   Every change is written to the audit log (layers/observability.py).

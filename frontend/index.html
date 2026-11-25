@@ -3,9 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Aria · Fortivex AI Sales Voice Agent</title>
+<title>Aria · Fortivex AI</title>
 <style>
-  /* ---------- Colours and basics ---------- */
+  /* ONE page for everyone. It first asks "customer or admin?":
+       customer -> the call + a live chat summary (the server sends no internal data, mode "customer")
+       admin    -> password -> Live call (call + cockpit), Knowledge, Sales dashboard, Quality, Users */
   :root {
     --bg: #0b1020; --panel: #131a2e; --panel2: #1a2340; --line: #26314f;
     --text: #e7ecf7; --muted: #8b97b5; --accent: #5b8cff; --accent2: #7c5cff;
@@ -14,40 +16,73 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  header { display: flex; align-items: center; gap: 16px; padding: 14px 24px;
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 24px; flex-wrap: wrap;
            border-bottom: 1px solid var(--line); background: var(--panel); }
   header h1 { font-size: 17px; margin: 0; }
   header h1 span { color: var(--muted); font-weight: 400; }
-  #health { margin-left: auto; font-size: 12px; color: var(--muted); }
-  main { padding: 20px 24px; }
+  header .right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  main { padding: 20px 24px; max-width: 1320px; margin: 0 auto; }
   .hidden { display: none !important; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
   .card h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .muted { color: var(--muted); } .small { font-size: 12px; }
+  a { color: var(--accent); }
+  button { font: inherit; cursor: pointer; }
   button.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff;
-                   border: 0; padding: 10px 18px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+                   border: 0; padding: 10px 18px; border-radius: 10px; font-weight: 600; }
+  button.primary:disabled { opacity: .5; cursor: wait; }
   button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
-                 padding: 9px 14px; border-radius: 10px; cursor: pointer; }
-  button.danger { background: var(--bad); color: #fff; border: 0; padding: 10px 18px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+                 padding: 7px 12px; border-radius: 10px; }
+  button.danger { background: var(--bad); color: #fff; border: 0; padding: 10px 18px; border-radius: 10px; font-weight: 600; }
+  button.del { background: none; color: var(--bad); border: 1px solid var(--line); padding: 4px 10px; border-radius: 8px; }
   input, select { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
-                  border-radius: 10px; padding: 9px 12px; font: inherit; }
+                  border-radius: 10px; padding: 9px 12px; font: inherit; min-width: 0; }
   .chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px;
           background: var(--panel2); border: 1px solid var(--line); margin: 2px 4px 2px 0; }
-  .muted { color: var(--muted); }
+  .stack > * + * { margin-top: 18px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tabs button { background: none; border: 1px solid var(--line); color: var(--muted); padding: 6px 12px; border-radius: 8px; }
+  .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-  /* ---------- Live call layout: call screen | cockpit ---------- */
+  /* ---------- Role chooser ---------- */
+  #view-role { max-width: 760px; margin: 8vh auto 0; text-align: center; }
+  #view-role h2 { font-size: 26px; margin: 0 0 6px; }
+  .roles { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 28px; text-align: left; }
+  .role-card { display: block; width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--line);
+               border-radius: 16px; padding: 22px; transition: border-color .15s, transform .15s; }
+  .role-card:hover, .role-card:focus-visible { border-color: var(--accent); transform: translateY(-2px); outline: none; }
+  .role-card .icon { font-size: 30px; }
+  .role-card b { display: block; font-size: 18px; margin: 8px 0 4px; }
+  @media (max-width: 640px) { .roles { grid-template-columns: 1fr; } #view-role { margin-top: 4vh; } }
+
+  /* ---------- Admin sign-in ---------- */
+  #login { max-width: 400px; margin: 10vh auto; }
+  #login form { display: flex; flex-direction: column; gap: 10px; }
+  .err { color: var(--bad); font-size: 13px; min-height: 1.2em; }
+  .pw { display: flex; gap: 8px; }
+  .pw input { flex: 1; min-width: 0; }
+  .pw input::-ms-reveal, .pw input::-ms-clear { display: none; }
+  .google { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 14px;
+            border-radius: 10px; background: #fff; color: #1f1f1f; font-weight: 600; text-decoration: none; }
+  .or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 14px 0 10px; }
+  .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+  .role { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--panel2);
+          border: 1px solid var(--line); text-transform: uppercase; letter-spacing: .04em; }
+
+  /* ---------- The call (one panel, moved between the customer view and the admin Live call tab) ---------- */
+  .customer-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); gap: 18px; }
   .call-layout { display: grid; grid-template-columns: minmax(340px, 1fr) minmax(380px, 1.15fr); gap: 18px; }
-  @media (max-width: 900px) { .call-layout { grid-template-columns: 1fr; } }
-
-  /* Call screen */
+  @media (max-width: 900px) { .customer-layout, .call-layout { grid-template-columns: 1fr; } }
   .phone { display: flex; flex-direction: column; height: calc(100vh - 120px); min-height: 520px; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .controls #phone { width: 180px; }
+  .controls label { white-space: nowrap; }
   .banner { margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
   .banner.memory { background: rgba(124,92,255,.15); border: 1px solid var(--accent2); }
   .banner.handoff { background: rgba(255,93,108,.15); border: 1px solid var(--bad); }
   .banner.booked { background: rgba(46,204,143,.15); border: 1px solid var(--good); }
-  .banner a { color: var(--accent); }
   #chat { flex: 1; overflow-y: auto; margin: 12px 0; padding-right: 4px; }
-  .msg { max-width: 85%; padding: 10px 13px; border-radius: 14px; margin: 8px 0; white-space: pre-wrap; }
+  .msg { max-width: 85%; padding: 10px 13px; border-radius: 14px; margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .msg.agent { background: var(--panel2); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
   .msg.customer { background: var(--accent); color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
   .msg .meta { font-size: 11px; opacity: .7; margin-top: 5px; }
@@ -56,11 +91,24 @@
   #mic { width: 56px; height: 56px; border-radius: 50%; border: 0; cursor: pointer; font-size: 22px;
          background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; flex: none; }
   #mic.listening { background: var(--bad); animation: pulse 1.2s infinite; }
+  /* Recording ourselves: the ring follows your voice level, so you can see the mic hears you. */
+  #mic.listening.level { animation: none; transition: box-shadow .08s;
+                         box-shadow: 0 0 0 calc(4px + var(--lvl, 0) * 16px) rgba(255,93,108,.35); }
   #mic:disabled { opacity: .4; cursor: default; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,93,108,.6); } 100% { box-shadow: 0 0 0 16px rgba(255,93,108,0); } }
   #status { font-size: 12px; color: var(--muted); min-height: 18px; margin-top: 6px; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
 
-  /* Cockpit */
+  /* Customer: live chat summary */
+  #summaryPanel { align-self: start; position: sticky; top: 16px; max-height: calc(100vh - 120px); overflow-y: auto; }
+  #summaryPanel h4 { margin: 14px 0 6px; font-size: 13px; }
+  #summaryPanel ul { margin: 4px 0; padding-left: 20px; }
+  .live-dot { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--good); }
+  .live-dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--good); animation: blink 1.4s infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  .sum-lead { font-size: 15px; margin: 8px 0; }
+
+  /* Admin: live cockpit */
   .cockpit { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-content: start; }
   .cockpit .wide { grid-column: span 2; }
   .score { font-size: 44px; font-weight: 700; line-height: 1; }
@@ -71,69 +119,151 @@
   .st-clear { color: var(--good); } .st-partial { color: var(--warn); } .st-unknown { color: var(--muted); }
   .sent { font-size: 20px; font-weight: 700; text-transform: capitalize; }
   .lat-row { display: grid; grid-template-columns: 46px 1fr 62px; gap: 8px; align-items: center; margin: 4px 0; font-size: 12px; }
-  .bar { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; }
+  .bar { height: 8px; background: var(--panel2); border-radius: 999px; overflow: hidden; }
   .bar div { height: 100%; background: var(--accent); }
+  .bar > i { display: block; height: 100%; background: var(--good); }
   #trace { max-height: 240px; overflow-y: auto; font-size: 12.5px; }
   .step { border-left: 2px solid var(--accent); padding: 4px 10px; margin: 6px 0; }
   .step.tool { border-color: var(--warn); } .step.rag { border-color: var(--good); }
   .step code { color: var(--warn); }
   .alert { color: var(--bad); font-weight: 600; }
+  @media (max-width: 600px) { .cockpit { grid-template-columns: 1fr; } .cockpit .wide { grid-column: auto; } }
 
-  a { color: var(--accent); }
+  /* Admin: knowledge */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } main { padding: 16px; } header { padding: 12px 16px; } }
+  .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px; text-align: center; cursor: pointer; }
+  .drop.over { border-color: var(--accent); background: rgba(91,140,255,.08); }
+  .scopes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+  .scope { display: block; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+  .scope input { margin-right: 6px; }
+  .scope:has(input:checked) { border-color: var(--accent); background: rgba(91,140,255,.08); }
+  .scope.internal:has(input:checked) { border-color: var(--warn); background: rgba(245,183,78,.08); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.public { background: rgba(46,204,143,.15); color: var(--good); }
+  .badge.internal { background: rgba(245,183,78,.15); color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+  th { font-size: 12px; color: var(--muted); font-weight: 500; }
+  td.name { word-break: break-all; }
+  td.name a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); cursor: pointer; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  .searchbar { display: flex; gap: 8px; flex-wrap: wrap; }
+  .searchbar input { flex: 1; min-width: 200px; }
+  .hit { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 10px; background: var(--panel2); }
+  .hit .src { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+  .hit pre, #previewText { white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; font: 13px/1.5 inherit; }
 
-  /* End-of-call summary popup */
-  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 10; }
-  #modal .card { max-width: 620px; width: 92%; max-height: 85vh; overflow-y: auto; }
+  /* Admin: dashboard + quality + users */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .stat .n { font-size: 28px; font-weight: 700; }
+  .grid2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
+  @media (max-width: 1000px) { .grid2 { grid-template-columns: 1fr; } }
+  .summary-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; background: var(--panel2); }
+  .scroll-x { overflow-x: auto; }
+  .pass { color: var(--good); font-weight: 700; } .fail { color: var(--bad); font-weight: 700; }
+  tr.click { cursor: pointer; } tr.click:hover td { background: var(--panel2); }
+  .span { display: grid; grid-template-columns: 110px 1fr 70px; gap: 8px; align-items: center; font-size: 12px; margin: 3px 0; }
+  .span .track { position: relative; height: 10px; background: var(--panel2); border-radius: 4px; }
+  .span .track i { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--accent); min-width: 2px; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 4px 10px; font-size: 13px; }
+  .kv b { color: var(--muted); font-weight: 500; }
+  pre.json { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--panel2);
+             padding: 8px; border-radius: 8px; max-height: 240px; overflow: auto; }
+  .userform { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .userform input:not([type=checkbox]) { flex: 1; min-width: 180px; }
+
+  /* Popups */
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
+  #modal .card { max-width: 620px; width: 100%; max-height: 85vh; overflow-y: auto; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 14px;
+           width: min(820px, calc(100% - 32px)); max-height: 80vh; padding: 16px; }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel2); z-index: 20;
+           border: 1px solid var(--line); padding: 10px 16px; border-radius: 10px; max-width: calc(100% - 32px); }
+  #toast.bad { border-color: var(--bad); }
+
+  @media (max-width: 600px) {
+    main { padding: 12px; }
+    .controls #phone, .controls select { flex: 1 1 100%; width: auto; }
+    .controls button { flex: 1 1 100%; }
+    .phone { height: calc(100vh - 90px); }
+    #summaryPanel { position: static; max-height: none; }
+    #mode { display: none; }
+  }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>Aria <span>· Fortivex AI Autonomous Sales Voice Agent</span></h1>
-  <span id="health">checking…</span>
+  <h1>Fortivex AI <span id="subtitle">· Aria, AI sales assistant</span></h1>
+  <div class="right">
+    <span id="health" class="small muted hidden"></span>
+    <span id="mode" class="small muted hidden"></span>
+    <div id="tabs" class="tabs hidden">
+      <button id="tab-live" onclick="showTab('live')">Live call</button>
+      <button id="tab-kb" onclick="showTab('kb')">Knowledge</button>
+      <button id="tab-dash" onclick="showTab('dash')">Sales dashboard</button>
+      <button id="tab-quality" onclick="showTab('quality')">Quality</button>
+      <button id="tab-users" onclick="showTab('users')">Users</button>
+    </div>
+    <span id="who" class="small muted"></span>
+    <button id="switchRole" class="ghost hidden" onclick="goRole('')" title="Back to: customer or admin">⇄ Switch role</button>
+    <button id="logout" class="ghost hidden">Log out</button>
+  </div>
 </header>
 
 <main>
-  <!-- =============================== LIVE CALL =============================== -->
-  <section id="view-call" class="call-layout">
-
-    <!-- Left: the call screen -->
-    <div class="card phone">
-      <div class="controls">
-        <input id="phone" placeholder="Caller phone number" value="9876543210" style="width:170px">
-        <select id="lang" title="The language you will speak (mic + Aria's replies)">
-          <optgroup label="English & Hindi">
-            <option value="en">English</option>
-            <option value="hi">हिन्दी Hindi</option>
-            <option value="hinglish">Hinglish (Hindi in English letters)</option>
-          </optgroup>
-          <optgroup label="South Indian">
-            <option value="kn">ಕನ್ನಡ Kannada</option>
-            <option value="te">తెలుగు Telugu</option>
-          </optgroup>
-        </select>
-        <select id="chatView" title="How messages appear in the chat" onchange="setChatView(this.value)">
-          <option value="original">Chat: as spoken</option>
-          <option value="en">Chat: in English</option>
-        </select>
-        <label class="muted" title="Off = browser voice, much faster"><input type="checkbox" id="natural" checked> Natural voice</label>
-        <label class="muted"><input type="checkbox" id="handsfree" checked> Hands-free</label>
-        <span style="flex:1"></span>
-        <button id="startBtn" class="primary" onclick="startCall()">📞 Start call</button>
-        <button id="endBtn" class="danger hidden" onclick="endCall()">End call</button>
-      </div>
-      <div id="banners"></div>
-      <div id="chat"><p class="muted">Press <b>Start call</b>, allow the microphone, and talk to Aria like a customer.
-        Try: “I run a dental clinic, can AI answer my calls?”, “kitna kharcha hoga?”, “book a demo tomorrow”.</p></div>
-      <div class="talk">
-        <button id="mic" onclick="toggleMic()" disabled title="Click to talk">🎙️</button>
-        <input id="typed" placeholder="…or type a message and press Enter" disabled
-               onkeydown="if(event.key==='Enter'){sendTyped()}">
-      </div>
-      <div id="status"></div>
+  <!-- ============================ 1. Who are you? ============================ -->
+  <section id="view-role">
+    <h2>Welcome to Fortivex AI</h2>
+    <p class="muted">How would you like to continue?</p>
+    <div class="roles">
+      <button class="role-card" onclick="goRole('customer')">
+        <span class="icon">📞</span>
+        <b>I'm a customer</b>
+        <span class="muted">Talk to Aria, our AI assistant, by voice or text. Ask about our services and prices, or book a free demo. You'll see a summary of the chat as you talk.</span>
+      </button>
+      <button class="role-card" onclick="goRole('admin')">
+        <span class="icon">🔐</span>
+        <b>I'm an admin</b>
+        <span class="muted">Sign in with the admin password: live call cockpit, sales dashboard, knowledge base, quality and users.</span>
+      </button>
     </div>
+  </section>
 
-    <!-- Right: the live cockpit (what the agent is thinking) -->
+  <!-- ============================ 2. Admin sign-in ============================ -->
+  <section id="login" class="card hidden">
+    <h3>Admin sign-in</h3>
+    <a id="googleBtn" class="google hidden" href="/api/auth/google/start">
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+      Sign in with Google
+    </a>
+    <div id="orLine" class="or hidden"><span>or password</span></div>
+    <form id="loginForm">
+      <div class="pw">
+        <input id="password" type="password" placeholder="Admin password" autocomplete="off" spellcheck="false" required>
+        <button type="button" id="pwToggle" class="ghost" aria-label="Show password">Show</button>
+      </div>
+      <button class="primary" type="submit">Log in</button>
+      <div id="loginErr" class="err"></div>
+    </form>
+    <p id="pwHint" class="small muted">The password is <code>ADMIN_PASSWORD</code> in the server's <code>.env</code> file.</p>
+    <button class="ghost" onclick="goRole('')">← Back</button>
+  </section>
+
+  <!-- ============================ 3. Customer: call + live chat summary ============================ -->
+  <section id="view-customer" class="customer-layout hidden">
+    <div id="customerCallSlot"></div>
+    <aside id="summaryPanel" class="card">
+      <h3>Chat summary</h3>
+      <div id="sumBody"></div>
+    </aside>
+  </section>
+
+  <!-- ============================ 4. Admin: Live call (call + cockpit) ============================ -->
+  <section id="live" class="call-layout hidden">
+    <div id="adminCallSlot"></div>
     <div class="cockpit">
       <div class="card">
         <h3>Lead score</h3>
@@ -169,140 +299,154 @@
     </div>
   </section>
 
+  <!-- ============================ 5. Admin: Knowledge ============================ -->
+  <section id="app" class="hidden stack">
+    <div class="card" id="uploadCard">
+      <h3>Upload a document</h3>
+      <div id="drop" class="drop">
+        <b>Drop a file here</b> or click to choose<br>
+        <span class="small muted">.pdf, .md or .txt · up to <span id="maxMb">50</span> MB · same name replaces the old version</span>
+      </div>
+      <input id="file" type="file" accept=".pdf,.md,.txt" class="hidden">
+      <div class="scopes">
+        <label class="scope internal">
+          <input type="radio" name="scope" value="internal" checked>
+          <span class="badge internal">INTERNAL</span> Confidential
+          <div class="small muted">Only admins can search it. The voice agent never reads it, so customers can't hear it.</div>
+        </label>
+        <label class="scope">
+          <input type="radio" name="scope" value="public">
+          <span class="badge public">PUBLIC</span> Agent knowledge
+          <div class="small muted">The agent uses it to answer customers. Anything here may be said on a call.</div>
+        </label>
+      </div>
+      <div id="queue" class="small"></div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3><span class="badge public">PUBLIC</span> &nbsp;Agent can use</h3>
+        <div id="list-public"></div>
+      </div>
+      <div class="card" id="internalCard">
+        <h3><span class="badge internal">INTERNAL</span> &nbsp;Confidential, managers + admins</h3>
+        <div id="list-internal"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Search the knowledge base</h3>
+      <form id="searchForm" class="searchbar">
+        <input id="q" placeholder="e.g. What is our discount policy?" required maxlength="500">
+        <select id="searchScope">
+          <option value="public">Public (what the agent finds)</option>
+          <option value="internal">Internal (confidential)</option>
+        </select>
+        <button class="primary" type="submit">Search</button>
+      </form>
+      <div id="hits"></div>
+    </div>
+  </section>
+
+  <!-- ============================ 6. Admin: Sales dashboard ============================ -->
+  <section id="dash" class="hidden stack">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2 style="margin:0;font-size:18px">Sales insights</h2>
+      <button class="ghost" onclick="loadDashboard().catch((e) => toast(e.message, true))">↻ Refresh</button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="grid2">
+      <div class="card"><h3>Leads (CRM)</h3><div id="leads" class="scroll-x"></div></div>
+      <div class="card"><h3>Booked demos</h3><div id="appts"></div></div>
+    </div>
+    <div class="card"><h3>Call summaries</h3><div id="calls"></div></div>
+  </section>
+
+  <!-- ============================ 7. Admin: Quality ============================ -->
+  <section id="quality" class="hidden stack">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h2 style="margin:0;font-size:18px">Quality · last 500 turns</h2>
+      <button class="ghost" onclick="loadQuality().catch((e) => toast(e.message, true))">↻ Refresh</button>
+    </div>
+    <div class="stats" id="qStats"></div>
+    <div class="grid2">
+      <div class="card"><h3>Evals (golden conversations)</h3><div id="qEval"></div></div>
+      <div class="card"><h3>Routing · models · guardrails</h3><div id="qMix"></div></div>
+    </div>
+    <div class="card"><h3>Recent turns (click for the trace)</h3><div id="qTraces" class="scroll-x"></div></div>
+    <div class="card" id="auditCard"><h3>Audit log</h3><div id="qAudit" class="scroll-x"></div></div>
+  </section>
+
+  <!-- ============================ 8. Admin: Users ============================ -->
+  <section id="users" class="hidden stack">
+    <div class="card">
+      <h3>Add or change a user</h3>
+      <form id="userForm" class="userform">
+        <input id="uEmail" type="email" placeholder="name@company.com" required>
+        <input id="uName" placeholder="Name (optional)">
+        <select id="uRole"><option value="sales_rep">sales_rep</option><option value="manager">manager</option>
+          <option value="viewer">viewer</option><option value="admin">admin</option></select>
+        <label class="small"><input id="uActive" type="checkbox" checked> active</label>
+        <button class="primary" type="submit">Save</button>
+      </form>
+      <p class="small muted">People sign in with Google using this email. Unticking "active" removes their access immediately.</p>
+    </div>
+    <div class="card"><h3>Users</h3><div id="uList" class="scroll-x"></div></div>
+    <div class="card"><h3>What each role can do</h3><div id="uRoles"></div></div>
+  </section>
+
+  <!-- ============ The call panel: ONE copy, moved into the customer view or the admin Live call tab ============ -->
+  <div id="callHome" class="hidden">
+  <div id="callPanel" class="card phone">
+    <div class="controls">
+      <input id="phone" type="tel" inputmode="tel" placeholder="Your phone number" autocomplete="tel" maxlength="20"
+             onkeydown="if(event.key==='Enter'){startCall()}">
+      <select id="lang" title="The language you will speak (mic + Aria's replies)">
+        <optgroup label="English & Hindi">
+          <option value="en">English</option>
+          <option value="hi">हिन्दी Hindi</option>
+          <option value="hinglish">Hinglish (Hindi in English letters)</option>
+        </optgroup>
+        <optgroup label="South Indian">
+          <option value="kn">ಕನ್ನಡ Kannada</option>
+          <option value="te">తెలుగు Telugu</option>
+        </optgroup>
+      </select>
+      <select id="chatView" title="How messages appear in the chat" onchange="setChatView(this.value)">
+        <option value="original">Chat: as spoken</option>
+        <option value="en">Chat: in English</option>
+      </select>
+      <label class="muted" title="Off = your browser's voice, faster"><input type="checkbox" id="natural" checked> Natural voice</label>
+      <label class="muted" title="Aria listens again automatically after she speaks"><input type="checkbox" id="handsfree" checked> Hands-free</label>
+      <span style="flex:1"></span>
+      <button id="startBtn" class="primary" onclick="startCall()">📞 Start call</button>
+      <button id="endBtn" class="danger hidden" onclick="endCall()">End call</button>
+    </div>
+    <div id="banners"></div>
+    <div id="chat"></div>
+    <div class="talk">
+      <button id="mic" onclick="toggleMic()" disabled title="Click to talk" aria-label="Talk">🎙️</button>
+      <input id="typed" placeholder="…or type a message and press Enter" disabled
+             onkeydown="if(event.key==='Enter'){sendTyped()}">
+    </div>
+    <div id="status"></div>
+    <div id="privacyNote" class="note">Please don't share card numbers, OTPs, passwords, Aadhaar or PAN on this call. Aria never needs them.</div>
+  </div>
+  </div>
 </main>
 
 <div id="modal" class="hidden"><div class="card" id="modalBody"></div></div>
+<dialog id="preview">
+  <div style="display:flex;align-items:center;gap:8px">
+    <b id="previewName"></b><span id="previewBadge"></span>
+    <button class="ghost" style="margin-left:auto" onclick="document.getElementById('preview').close()">Close</button>
+  </div>
+  <pre id="previewText"></pre>
+</dialog>
+<div id="toast" class="hidden"></div>
 
 <script src="call-core.js"></script>
-<script>
-// ============================================================================
-// Staff demo page = the shared call (call-core.js) + the live cockpit on the right.
-// The customer page (call.html) uses the same call code without any of this.
-// ============================================================================
-let pollTimer = null;
-
-window.CALL_HOOKS = {
-  startBody: () => ({ phone: $("phone").value, mode: "demo" }),
-  onStart(r) {
-    $("trace").innerHTML = "";
-    resetCockpit();
-    if (r.returning) {
-      // The earlier summary stays on the server: anyone can type a phone number, so the page never shows it.
-      addBanner("memory", `🧠 Returning caller${r.previous_date ? " (last call " + esc(r.previous_date) + ")" : ""}. Aria remembers the last call; the details stay in the CRM.`);
-    }
-    pollTimer = setInterval(pollLive, 1200);
-  },
-  turnMeta: (r) => r.sources
-    ? [r.language, r.sources.length ? "📄 " + r.sources.length + " source(s)" : ""].filter(Boolean).join(" · ")
-    : (r.voice ? `voice: ${r.voice}` : ""),
-  onTurn: (r) => showTurnDetails(r),
-  beforeEnd: () => clearInterval(pollTimer),
-  onEnd: (r) => showSummary(r.summary, r.lead, r.portal_url),
-  endedStatus: "Call ended and saved to CRM.",
-  handoffText: "🙋 Handed over to a human sales consultant — lead flagged in CRM with full context.",
-};
-
-// ============================================================================
-// Cockpit: per-turn details (from the reply) + live analysis (polling)
-// ============================================================================
-function showTurnDetails(r) {
-  // Latency bars
-  const L = r.latency, max = Math.max(L.total_ms, 1);
-  const row = (name, ms) => `<div class="lat-row"><span>${name}</span><div class="bar"><div style="width:${Math.min(100, ms / max * 100)}%"></div></div><span>${ms} ms</span></div>`;
-  $("latency").innerHTML = row("RAG", L.rag_ms) + row("LLM", L.llm_ms) + row("Voice", L.tts_ms || 0) + row("Total", L.total_ms);
-  const tok = r.tokens ? ` · ${r.tokens.in + r.tokens.out} tokens` : "";
-  $("provider").textContent = `LLM: ${r.provider} · route: ${r.route || "-"}${tok} · voice: ${r.voice}${r.trace_id ? " · trace " + r.trace_id : ""}`;
-
-  // Reasoning trace: guardrails -> RAG -> router/cache -> tools -> thought (newest turn on top)
-  let html = "";
-  for (const e of r.events) {
-    if (e.type === "guard") html += `<div class="step tool">🛡️ Guardrail: ${esc(e.detail)}</div>`;
-    if (e.type === "route") html += `<div class="step">🧭 Router: ${esc(e.detail)}</div>`;
-    if (e.type === "cache") html += `<div class="step rag">⚡ Cache: ${esc(e.detail)}</div>`;
-    if (e.type === "rag") html += `<div class="step rag">📚 RAG: ${esc(e.detail)} (${e.ms} ms)${e.sources.length ? "<br>" + e.sources.map(s => `<span class="chip">${esc(s)}</span>`).join("") : "<br><span class='muted'>No matching facts → agent must not guess</span>"}</div>`;
-    if (e.type === "tool") html += `<div class="step tool">🛠️ Tool <code>${esc(e.detail)}</code>(${esc(JSON.stringify(e.args || {}))})<br><span class="muted">→ ${esc(JSON.stringify(e.result).slice(0, 220))}</span></div>`;
-  }
-  html += r.thoughts.filter(Boolean).map(t => `<div class="step">💭 ${esc(t)}</div>`).join("");
-  $("trace").innerHTML = `<div style="border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:6px">${html}</div>` + $("trace").innerHTML;
-}
-
-async function pollLive() {
-  if (!sessionId) return;
-  try {
-    const d = await api(`/api/call/${sessionId}/live`);
-    const a = d.analysis || {};
-    if (a.score === undefined) return;
-    $("score").textContent = a.score;
-    $("tier").textContent = a.tier; $("tier").className = "tier " + a.tier;
-    $("intent").textContent = a.intent ? "Intent: " + a.intent : "";
-    $("sentiment").textContent = a.sentiment || "–";
-    $("sentiment").style.color = a.sentiment === "positive" ? "var(--good)" : a.sentiment === "negative" ? "var(--bad)" : "var(--text)";
-    $("emotion").textContent = a.emotion ? "Emotion: " + a.emotion : "";
-    $("alert").textContent = a.alert || "";
-    drawSparkline(a.sentiment_history || []);
-    const bant = a.bant || {};
-    $("bant").innerHTML = ["need", "budget", "authority", "timeline"].map(k => {
-      const b = bant[k] || {}, st = b.status || "unknown";
-      return `<div class="bant-row"><span><b>${k[0].toUpperCase() + k.slice(1)}</b><br><span class="muted">${esc(b.value || "—")}</span></span><span class="st-${st}">${st === "clear" ? "✔ " : st === "partial" ? "◐ " : "○ "}${st}</span></div>`;
-    }).join("");
-    const list = (arr) => (arr || []).map(x => `<span class="chip">${esc(x)}</span>`).join("") || "<span class='muted'>—</span>";
-    $("insights").innerHTML = `<div><b>Buying signals:</b> ${list(a.buying_signals)}</div>
-      <div style="margin-top:6px"><b>Objections:</b> ${list(a.objections)}</div>
-      <div style="margin-top:6px"><b>Next best action:</b> ${esc(a.next_best_action || "—")}</div>`;
-  } catch (e) { /* call may have ended */ }
-}
-
-function drawSparkline(values) {
-  // Sentiment from -1 (bottom) to +1 (top), one point per customer turn.
-  if (values.length < 1) { $("spark").innerHTML = ""; return; }
-  const pts = values.map((v, i) => [values.length === 1 ? 100 : i * 200 / (values.length - 1), 20 - v * 18]);
-  $("spark").innerHTML = `<line x1="0" y1="20" x2="200" y2="20" stroke="#26314f" stroke-dasharray="3"/>
-    <polyline fill="none" stroke="#5b8cff" stroke-width="2" points="${pts.map(p => p.join(",")).join(" ")}"/>
-    ${pts.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="2.5" fill="#7c5cff"/>`).join("")}`;
-}
-
-function resetCockpit() {
-  $("score").textContent = "–"; $("tier").textContent = "cold"; $("tier").className = "tier cold";
-  ["intent", "emotion", "alert", "provider"].forEach(id => $(id).textContent = "");
-  $("sentiment").textContent = "–"; $("spark").innerHTML = "";
-  $("bant").innerHTML = "<p class='muted'>Updates after each customer turn.</p>";
-  $("latency").innerHTML = "<p class='muted'>No turns yet.</p>";
-  $("insights").textContent = "Buying signals, objections and the next best action appear here.";
-}
-
-// ============================================================================
-// End-of-call summary popup (internal view: score, objections, sales next steps)
-// ============================================================================
-function showSummary(s, lead, portalUrl) {
-  const list = (arr) => (arr || []).length ? "<ul>" + arr.map(x => `<li>${esc(x)}</li>`).join("") + "</ul>" : "<p class='muted'>—</p>";
-  $("modalBody").innerHTML = `
-    <h3>Call summary</h3>
-    <p style="font-size:15px">${esc(s.summary)}</p>
-    <p><span class="tier ${esc(s.tier)}">${esc(s.tier)}</span> &nbsp;Score <b>${s.lead_score}</b> · Outcome <b>${esc(s.outcome)}</b> · Language <b>${esc(s.language)}</b> · ${s.turns} customer turns</p>
-    ${portalUrl ? `<div class="banner booked" style="margin:0 0 12px">📄 <b>Customer's private summary page</b><br>
-      <span class="muted">The customer can open this any time to read their own call summaries (no internal notes).</span><br>
-      <a href="${esc(portalUrl)}" target="_blank" rel="noopener">${esc(location.origin + portalUrl.split("#")[0])}#…</a>
-      <button class="ghost" style="padding:3px 10px;margin-left:6px" onclick="navigator.clipboard.writeText(location.origin + ${esc(JSON.stringify(portalUrl))}).then(() => this.textContent = 'Copied')">Copy link</button></div>`
-      : returningCaller ? `<div class="banner memory" style="margin:0 0 12px">📄 Your private summary page is the link you got after your first call. Lost it? Our team can send you a new one.</div>` : ""}
-    <p><b>Lead:</b> ${esc(lead.name || "unknown")} · ${esc(lead.phone)} ${lead.email ? "· " + esc(lead.email) : ""} ${lead.company ? "· " + esc(lead.company) : ""}</p>
-    <b>Needs</b>${list(s.customer_needs)}
-    <b>Objections</b>${list(s.objections)}
-    <b>Next steps for sales team</b>${list(s.next_steps)}
-    <p><b>Follow-up:</b> ${esc(s.follow_up || "—")}</p>
-    <p class="muted"><b>Agent feedback:</b> ${esc(s.agent_feedback || "—")}</p>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="primary" onclick="$('modal').classList.add('hidden')">Close</button>
-    </div>`;
-  $("modal").classList.remove("hidden");
-}
-
-// ============================================================================
-// Startup: show whether keys / RAG are ready
-// ============================================================================
-api("/api/health").then(h => {
-  const keys = [h.gemini_key && "Gemini", h.groq_key && "Groq"].filter(Boolean);
-  $("health").innerHTML = `LLM: <b>${keys.length ? keys.join(" + ") : "⚠ no API keys"}</b> · RAG: ${h.rag_mode} (${h.rag_chunks} chunks)`;
-}).catch(() => $("health").textContent = "server not reachable");
-</script>
+<script src="customer.js"></script>
+<script src="cockpit.js"></script>
+<script src="admin.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

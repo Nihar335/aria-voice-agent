@@ -19,11 +19,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import config
 import llm
+import stt
 import tts
 from admin import router as admin_router
 from agent import Session, greeting, handle_turn, remember_reply
@@ -59,8 +61,8 @@ LATENCIES: list[int] = []           # total ms per turn, for the dashboard
 # ---------------------------------------------------------------------------
 class StartCall(BaseModel):
     phone: str = Field(..., min_length=4, max_length=20)
-    # "demo" = the staff demo page with the live cockpit (index.html).
-    # "customer" = the public call page (call.html): the server only ever sends customer-safe fields.
+    # "demo" = the admin Live call tab with the cockpit (index.html -> Admin).
+    # "customer" = the customer view (index.html -> Customer): the server only ever sends customer-safe fields.
     mode: str = Field("demo", pattern="^(demo|customer)$")
 
 
@@ -92,7 +94,8 @@ def booking_from(events: list) -> dict | None:
 
 # What the CUSTOMER page may receive per turn. Everything else (thoughts, tools, RAG sources,
 # routing, tokens, latency, trace id) is internal and only goes to the staff demo page.
-CUSTOMER_TURN_FIELDS = ("reply", "reply_en", "customer_en", "language", "handoff", "booking", "audio", "voice")
+CUSTOMER_TURN_FIELDS = ("reply", "reply_en", "customer_en", "language", "handoff", "booking", "audio", "audio_mime",
+                        "voice")
 
 CALLER_FIELDS = ("name", "phone", "email", "company")
 
@@ -159,7 +162,7 @@ async def call_turn(body: Turn, background: BackgroundTasks):
     if body.natural_voice:
         voice = await tts.speak(result["reply"], result["language"])
     else:
-        voice = {"audio": None, "voice": "browser", "tts_ms": 0}
+        voice = {"audio": None, "audio_mime": None, "voice": "browser", "tts_ms": 0}
     result["latency"]["tts_ms"] = voice["tts_ms"]
     result["latency"]["total_ms"] = int((time.perf_counter() - t0) * 1000)
     LATENCIES.append(result["latency"]["total_ms"])
@@ -170,6 +173,44 @@ async def call_turn(body: Turn, background: BackgroundTasks):
     if session.customer_mode:
         return {k: out.get(k) for k in CUSTOMER_TURN_FIELDS}
     return out
+
+
+@app.post("/api/call/stt")
+async def call_stt(request: Request, session_id: str, language: str = "en"):
+    """
+    The customer's spoken turn as audio (16 kHz WAV recorded by the page) -> text.
+    The page then sends that text to /api/call/turn like a typed message.
+    """
+    session = _get_session(session_id)
+    if language not in stt.LANGUAGE_NAMES:
+        language = "en"
+    if rate_limited(f"stt:{session.id}", config.MAX_TURNS_PER_MINUTE * 2, 60):
+        raise HTTPException(429, "Too many recordings. Please wait a moment.")
+    mime = (request.headers.get("content-type") or "audio/wav").split(";")[0].strip()
+    if not mime.startswith("audio/"):
+        raise HTTPException(415, "Send the recording as audio")
+    audio = await request.body()
+    if not audio:
+        raise HTTPException(400, "Empty recording")
+    if len(audio) > config.MAX_AUDIO_MB * 1024 * 1024:
+        raise HTTPException(413, "Recording too long")
+    try:
+        r = await run_in_threadpool(stt.transcribe, audio, mime, language)
+    except Exception as e:
+        print(f"[main] {e}")
+        raise HTTPException(503, "Speech recognition is unavailable right now")
+    return {"text": r["text"]} if session.customer_mode else r
+
+
+@app.get("/api/call/{session_id}/recap")
+def call_recap(session_id: str):
+    """
+    The live "chat summary" for BOTH pages: a short recap written for the customer.
+    It comes from the background analysis, but only the customer-safe fields leave the server.
+    """
+    a = _get_session(session_id).analysis or {}
+    points = [str(p) for p in (a.get("recap_points") or []) if p][:4]
+    return {"recap": str(a.get("recap") or ""), "points": points}
 
 
 @app.get("/api/call/{session_id}/live")
@@ -237,6 +278,27 @@ def health():
             "cache": {"enabled": config.CACHE_ENABLED, **cache.stats()},
             "guardrails": config.GUARDRAILS_ENABLED, "google_sign_in": bool(config.GOOGLE_CLIENT_ID),
             "llm_rate_limited": llm.cooling_down()}
+
+
+@app.middleware("http")
+async def revalidate_page_files(request: Request, call_next):
+    # The page's HTML/JS must never come from a stale browser cache after an update (a new page with an
+    # old call-core.js breaks the call). "no-cache" = the browser re-checks each time (a cheap 304 if unchanged).
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
+
+# One page for everyone: index.html asks "customer or admin?". Old links keep working.
+@app.get("/call.html", include_in_schema=False)
+def old_customer_page():
+    return RedirectResponse("/#customer")
+
+
+@app.get("/admin.html", include_in_schema=False)
+def old_admin_page():
+    return RedirectResponse("/#admin")
 
 
 # The web page (Stage 6). Mounted last, so /api/... routes win.

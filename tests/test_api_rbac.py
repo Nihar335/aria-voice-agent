@@ -191,6 +191,33 @@ class CustomerCallPage(unittest.TestCase):
         self.assertIn("booking", turn)
         self.assertEqual(client.get(f"/api/call/{sid}/live").status_code, 200)
 
+    def test_live_recap_has_only_customer_safe_fields(self):
+        sid = client.post("/api/call/start", json={"phone": "9000088877", "mode": "customer"}).json()["session_id"]
+        main.SESSIONS[sid].analysis = {"recap": "You asked about prices.", "recap_points": ["You run a clinic"],
+                                       "score": 90, "objections": ["price"], "next_best_action": "push hard"}
+        r = client.get(f"/api/call/{sid}/recap").json()
+        self.assertEqual(r, {"recap": "You asked about prices.", "points": ["You run a clinic"]})
+
+    def test_speech_to_text_endpoint(self):
+        sid = client.post("/api/call/start", json={"phone": "9000088866", "mode": "customer"}).json()["session_id"]
+        saved = main.stt.transcribe
+        main.stt.transcribe = lambda audio, mime, lang: {"text": f"heard {len(audio)} bytes in {lang}",
+                                                          "provider": "groq", "stt_ms": 5}
+        try:
+            url = f"/api/call/stt?session_id={sid}&language=te"
+            r = client.post(url, content=b"RIFF" + b"\0" * 100, headers={"Content-Type": "audio/wav"})
+            self.assertEqual(r.json(), {"text": "heard 104 bytes in te"})       # customer: text only
+            self.assertEqual(client.post(url, content=b"x", headers={"Content-Type": "text/plain"}).status_code, 415)
+            self.assertEqual(client.post(url, content=b"", headers={"Content-Type": "audio/wav"}).status_code, 400)
+            self.assertEqual(client.post("/api/call/stt?session_id=nope", content=b"x",
+                                         headers={"Content-Type": "audio/wav"}).status_code, 404)
+        finally:
+            main.stt.transcribe = saved
+
+    def test_old_page_links_redirect_to_the_single_page(self):
+        self.assertEqual(client.get("/call.html", follow_redirects=False).headers["location"], "/#customer")
+        self.assertEqual(client.get("/admin.html", follow_redirects=False).headers["location"], "/#admin")
+
     def test_unknown_mode_rejected(self):
         self.assertEqual(client.post("/api/call/start", json={"phone": "9000099998", "mode": "admin"}).status_code, 422)
 

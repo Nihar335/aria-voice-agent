@@ -222,7 +222,7 @@ def google_start():
 
 def _fail(msg: str) -> RedirectResponse:
     # The fragment (#...) is never sent to servers or logged.
-    return RedirectResponse("/admin.html#" + urlencode({"error": msg}))
+    return RedirectResponse("/#" + urlencode({"error": msg}))
 
 
 @router.get("/google/callback")
@@ -262,7 +262,7 @@ def google_callback(code: str = "", state: str = "", error: str = ""):
     _touch_login(email)
     audit(email, user["role"], "login", "google")
     token = _new_session(email, user["role"], name or user.get("name") or "", "google")
-    return RedirectResponse("/admin.html#" + urlencode({"token": token}))
+    return RedirectResponse("/#" + urlencode({"token": token}))
 
 
 # --- User management (admin only) ---

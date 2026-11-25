@@ -41,7 +41,20 @@ DATA_DIR.mkdir(exist_ok=True)
 INTERNAL_KNOWLEDGE_DIR = BASE_DIR / "knowledge_internal"
 INTERNAL_KNOWLEDGE_DIR.mkdir(exist_ok=True)
 
-# --- Admin login for /admin.html (empty = admin page disabled) ---
+# --- Voice OUT: Gemini TTS for these languages (smoother, more natural accent), edge-tts for the rest ---
+GEMINI_TTS_LANGS = {x.strip() for x in os.getenv("GEMINI_TTS_LANGS", "te").split(",") if x.strip()}
+# Free tier = 3 requests/minute PER MODEL, so several models are rotated (comma-separated, in order).
+GEMINI_TTS_MODELS = os.getenv("GEMINI_TTS_MODELS", "gemini-3.8-flash-lite-tts,gemini-3.8-flash-tts,"
+                              "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts")
+GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Sulafat").strip()   # Sulafat = warm; also Aoede, Leda
+
+# --- Voice IN: server speech-to-text. "auto" = Gemini for Telugu/Kannada/Hinglish, Groq Whisper otherwise ---
+STT_PROVIDER = os.getenv("STT_PROVIDER", "auto").strip().lower()
+GROQ_STT_MODEL = os.getenv("GROQ_STT_MODEL", "whisper-large-v3").strip()
+GEMINI_STT_MODEL = os.getenv("GEMINI_STT_MODEL", "gemini-flash-lite-latest,gemini-3.5-flash-lite,gemini-3.5-flash")
+MAX_AUDIO_MB = 4     # one spoken turn; 16 kHz WAV = ~2 minutes
+
+# --- Admin login on the main page (empty = admin password sign-in disabled) ---
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 
 # --- Largest document the admin page accepts (MB). PDFs are stored as their extracted text. ---

@@ -29,14 +29,14 @@ See it working: admin page → **Quality** tab (traces, eval score, guardrail hi
 ## Features
 | Feature | Where in the code |
 |---|---|
-| 🎙️ Real-time voice: speech-to-text, neural text-to-speech, barge-in | `frontend/index.html`, `tts.py` |
+| 🎙️ Real-time voice: server speech-to-text (Whisper / Gemini), natural voices (Gemini TTS for Telugu, edge-tts), barge-in | `frontend/call-core.js`, `stt.py`, `tts.py` |
 | 🧠 Memory (in-call + returning caller) & 🌐 multilingual with auto-switching | `agent.py`, `analysis.py` |
 | 🎯 Lead qualification (BANT score 0-100) & 😊 sentiment with escalation alert | `analysis.py` |
 | 📚 RAG with sources and a "no guessing" threshold | `rag.py`, `knowledge_base/` |
 | 📅 Appointment booking (validated slots + Google Calendar) & CRM adapter | `tools.py`, `crm.py` |
-| 📝 Call summary, next steps & sales dashboard (admin login) | `analysis.py`, `admin.py`, `frontend/admin.html` |
-| 🔐 Knowledge admin: upload PDF/MD/TXT, public vs confidential collections | `admin.py`, `rag.py`, `frontend/admin.html` |
-| ⚡ Live cockpit: agent thoughts, tool calls, sources, latency per stage | `frontend/index.html` |
+| 📝 Live chat summary for the customer, call summary, next steps & sales dashboard (admin login) | `analysis.py`, `admin.py`, `frontend/customer.js`, `frontend/admin.js` |
+| 🔐 Knowledge admin: upload PDF/MD/TXT, public vs confidential collections | `admin.py`, `rag.py`, `frontend/admin.js` |
+| ⚡ Live cockpit: agent thoughts, tool calls, sources, latency per stage | `frontend/cockpit.js` |
 | 🙋 Human handoff, 🔁 LLM fallback chain (Groq ⇄ Gemini, 5 models) | `tools.py`, `llm.py` |
 
 ## Quick start (Windows)
@@ -47,11 +47,11 @@ python -m venv .venv
 copy .env.example .env          # then paste your keys into .env
 .venv\Scripts\python -m uvicorn main:app --reload
 ```
-Open **http://localhost:8000** in Chrome, press **Start call**, allow the microphone and talk. API docs: http://localhost:8000/docs.
+Open **http://localhost:8000** in Chrome. One page asks **"I'm a customer"** or **"I'm an admin"**:
+- **Customer** (`/#customer`): the call plus a **live chat summary** that builds up while you talk. The server runs these calls in `customer` mode and never sends them internal data (score, reasoning, sources, objections).
+- **Admin** (`/#admin`): asks for the password, then **Live call** (the same call plus the cockpit: lead score, BANT, agent reasoning, latency), **Knowledge**, **Sales dashboard**, **Quality** and **Users**.
 
-Two call pages share the same call code (`frontend/call-core.js`):
-- **http://localhost:8000/call.html** is the **customer page**: just the call. The server runs these calls in `customer` mode and never sends them internal data (score, reasoning, sources, objections).
-- **http://localhost:8000/** is the **staff demo**: the same call plus the live cockpit (lead score, BANT, agent reasoning, latency).
+Press **Start call**, allow the microphone and talk. API docs: http://localhost:8000/docs. The old `/call.html` and `/admin.html` links redirect to the right view.
 
 Docker: `docker build -t aria .` then `docker run -p 8000:8000 --env-file .env aria`.
 
@@ -61,7 +61,7 @@ Docker: `docker build -t aria .` then `docker run -p 8000:8000 --env-file .env a
 3. "Thoda mehenga lag raha hai, discount milega?" (Hinglish + objection)
 4. "Okay, book a demo tomorrow at 3." (availability check + booking + calendar link)
 5. "What's the capital of France?" (it will not guess)
-6. End the call → summary. Open `/admin.html` → sales dashboard. Call again with the same number → "welcome back".
+6. End the call → summary. Switch role → Admin → sales dashboard. Call again with the same number → "welcome back".
 
 ## Project structure
 ```
@@ -78,18 +78,20 @@ rag.py           Retrieval: public + internal collections, chunking, embeddings,
 tools.py         Tool registry: JSON schemas, validation, per-role permissions
 crm.py           CRM adapter (SQLite today; Fortivex CRM / Zoho / HubSpot = one class)
 analysis.py      Language detection, sentiment, BANT lead score, call summary
-tts.py           Neural voices (edge-tts) per language
+tts.py           Voices: Gemini TTS (Telugu, smoother accent) and edge-tts, with fallbacks
+stt.py           Speech-to-text: Groq Whisper (English/Hindi) and Gemini (Telugu/Kannada/Hinglish)
 config.py        Settings from .env
 knowledge_base/  Public company documents the agent answers from (sample pricing)
 knowledge_internal/ Confidential documents, admin search only (git-ignored)
-frontend/        call.html: customer call page · index.html: staff demo (call + live cockpit) · call-core.js: shared call code
-                 admin.html: login, dashboard, knowledge · my-calls.html: customer's private summary page
+frontend/        index.html: the single page (customer or admin) · call-core.js: the call (mic, voices, chat)
+                 customer.js: live chat summary · cockpit.js: admin live call · admin.js: admin tabs · app.js: role router
+                 my-calls.html: customer's private summary page
 docs/            Architecture, scaling, security, costs
 ```
 
 ## Knowledge admin (upload files)
 
-Open `http://localhost:8000/admin.html` and **Sign in with Google** (set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and your email in `ADMIN_EMAILS` in `.env`; the first sign-in makes you admin, then add teammates in the **Users** tab). `ADMIN_PASSWORD` still works as a break-glass admin login; leave it empty in production.
+Open `http://localhost:8000`, choose **I'm an admin** and **Sign in with Google** (set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and your email in `ADMIN_EMAILS` in `.env`; the first sign-in makes you admin, then add teammates in the **Users** tab). `ADMIN_PASSWORD` still works as a break-glass admin login; leave it empty in production.
 Upload `.pdf`, `.md` or `.txt` files into one of two collections:
 
 | Collection | Folder | Who can read it |
@@ -107,7 +109,7 @@ and copyable from the admin dashboard (**Copy** / **Reset** per lead). It shows 
 customer's own calls: a summary written for them, what happens next, the transcript and any
 booked demo. Internal notes (score, objections, sales next steps) are never sent to it.
 
-Uploads default to **Internal**. The client page (`index.html`) has no admin access: every
+Uploads default to **Internal**. The customer view has no admin access: every
 `/api/admin/...` route needs the login token, and neither folder is served as static files.
 
 ## Configuration (`.env`)
@@ -117,7 +119,9 @@ Uploads default to **Internal**. The client page (`index.html`) has no admin acc
 | `LLM_PROVIDER` | `groq` or `gemini`: which to try first; the other is the backup |
 | `GROQ_MODEL`, `GEMINI_MODEL` | Comma-separated model lists, tried in order (each model has its own rate limit) |
 | `GEMINI_EMBED_MODEL` | Embedding model for RAG |
-| `ADMIN_PASSWORD` | Password for `/admin.html` (empty = admin page disabled) |
+| `ADMIN_PASSWORD` | Admin password on the main page (empty = password sign-in disabled) |
+| `GEMINI_TTS_LANGS`, `GEMINI_TTS_VOICE` | Languages that use Gemini's natural voice (default `te`) and which voice (default `Sulafat`) |
+| `STT_PROVIDER` | `auto` (Gemini for Telugu/Kannada/Hinglish, Groq Whisper otherwise), `groq` or `gemini` |
 | `MAX_UPLOAD_MB` | Largest file the admin page accepts, in MB (default 50) |
 
 Each module can be tested alone: `python llm.py`, `python rag.py`, `python analysis.py`, `python tts.py`, and `python agent.py` (text chat in the terminal).

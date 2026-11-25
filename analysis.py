@@ -71,8 +71,12 @@ TURN_PROMPT = """You analyse a live sales call for Fortivex AI. Read the convers
  "lead_fields": {"name": null, "email": null, "company": null},
  "buying_signals": ["short phrases, may be empty"],
  "objections": ["short phrases, may be empty"],
- "next_best_action": "one short suggestion for the agent"
+ "next_best_action": "one short suggestion for the agent",
+ "recap": "1-2 short, friendly English sentences written TO the customer ('you'): what has been discussed so far and anything agreed",
+ "recap_points": ["up to 4 short English facts the customer told us or was told by Aria, e.g. 'You run a dental clinic in Jayanagar', 'You asked about the Starter plan price'"]
 }
+"recap" and "recap_points" are shown LIVE to the customer: never put scores, BANT, sentiment, objections,
+sales tactics or internal notes in them, and no price/discount that Aria did not actually say.
 Rules: only use what the CUSTOMER actually said. "clear" = a specific answer (e.g. "budget 20k per month", "I am the owner", "need it this month"). "partial" = vague hint. Otherwise "unknown"."""
 
 # Points per BANT item. Need matters most for us: no need = no sale.

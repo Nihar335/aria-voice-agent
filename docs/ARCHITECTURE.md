@@ -44,7 +44,7 @@ flowchart LR
     subgraph Browser["Browser - frontend/index.html"]
         MIC["🎙️ Chrome Speech-to-Text<br/>en-IN · hi-IN · kn-IN · te-IN"]
         UI["Call screen +<br/>Live cockpit<br/>(index.html)"]
-        ADM["Admin page (admin.html)<br/>login · sales dashboard ·<br/>knowledge upload + search"]
+        ADM["Admin view (index.html &rarr; Admin)<br/>login · sales dashboard ·<br/>knowledge upload + search"]
         SPK["🔊 Audio player<br/>(browser voice fallback)"]
     end
 
