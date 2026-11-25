@@ -16,22 +16,27 @@ One full voice turn (the end-to-end workflow):
 import re
 import time
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import config
 import tts
-from admin import require_admin, router as admin_router
+from admin import router as admin_router
 from agent import Session, greeting, handle_turn, remember_reply
 from analysis import analyze_turn, end_call
 from crm import get_crm
+from layers import cache, prompts
+from layers.guardrails import rate_limited
+from layers.rbac import require, router as auth_router, users_router
 from portal import portal_path, router as portal_router
 from rag import get_kb
 
 app = FastAPI(title="Fortivex AI Sales Voice Agent")
-app.include_router(admin_router)   # /api/admin/... (password protected)
+app.include_router(auth_router)    # /api/auth/... Google sign-in, password break-glass, /me
+app.include_router(users_router)   # /api/admin/users (admin only)
+app.include_router(admin_router)   # /api/admin/... (each route checks an RBAC permission)
 app.include_router(portal_router)  # /api/portal (customer sees only their own calls)
 
 SESSIONS: dict[str, Session] = {}   # live calls (in memory for the MVP; Redis in production)
@@ -68,7 +73,11 @@ def _get_session(session_id: str) -> Session:
 # Call endpoints
 # ---------------------------------------------------------------------------
 @app.post("/api/call/start")
-async def start_call(body: StartCall):
+async def start_call(body: StartCall, request: Request):
+    # Guardrail: one IP can't start hundreds of calls (each call costs LLM + TTS money).
+    ip = request.client.host if request.client else "unknown"
+    if rate_limited(f"call:{ip}", config.MAX_CALLS_PER_HOUR_PER_IP, 3600):
+        raise HTTPException(429, "Too many calls from this network. Please try again later.")
     phone = re.sub(r"\D", "", body.phone)          # keep digits only
     if len(phone) < 4:
         raise HTTPException(400, "Invalid phone number")
@@ -86,6 +95,8 @@ async def start_call(body: StartCall):
 @app.post("/api/call/turn")
 async def call_turn(body: Turn, background: BackgroundTasks):
     session = _get_session(body.session_id)
+    if rate_limited(f"turn:{session.id}", config.MAX_TURNS_PER_MINUTE, 60):
+        raise HTTPException(429, "You're speaking faster than I can answer. Please wait a moment.")
     t0 = time.perf_counter()
     try:
         # handle_turn is normal (blocking) code -> run it in a thread so the server stays responsive.
@@ -137,7 +148,7 @@ async def call_end(body: EndCall):
 # Dashboard (admin only: it lists every lead's phone, transcript and summary) + health
 # ---------------------------------------------------------------------------
 @app.get("/api/admin/dashboard")
-def dashboard(_: str = Depends(require_admin)):
+def dashboard(_: dict = Depends(require("dashboard:read"))):
     crm = get_crm()
     leads, calls, appts = crm.list_leads(), crm.list_calls(), crm.list_appointments()
     scores = [l["score"] or 0 for l in leads]
@@ -160,7 +171,10 @@ def dashboard(_: str = Depends(require_admin)):
 def health():
     return {"status": "ok", "llm_provider": config.LLM_PROVIDER,
             "gemini_key": bool(config.GEMINI_API_KEY), "groq_key": bool(config.GROQ_API_KEY),
-            "rag_mode": get_kb().mode, "rag_chunks": len(get_kb().chunks)}
+            "rag_mode": get_kb().mode, "rag_chunks": len(get_kb().chunks),
+            "prompt_version": prompts.version(), "router": config.ROUTER_ENABLED,
+            "cache": {"enabled": config.CACHE_ENABLED, **cache.stats()},
+            "guardrails": config.GUARDRAILS_ENABLED, "google_sign_in": bool(config.GOOGLE_CLIENT_ID)}
 
 
 # The web page (Stage 6). Mounted last, so /api/... routes win.

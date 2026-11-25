@@ -41,6 +41,10 @@
   #login { max-width: 380px; margin: 12vh auto; }
   #login form { display: flex; flex-direction: column; gap: 10px; }
   .err { color: var(--bad); font-size: 13px; min-height: 1.2em; }
+  .pw { display: flex; gap: 8px; }
+  .pw input { flex: 1; min-width: 0; }
+  /* Hide Edge's own eye icon (it disappears for autofilled values); we use our Show button instead. */
+  .pw input::-ms-reveal, .pw input::-ms-clear { display: none; }
 
   .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px; text-align: center; cursor: pointer; }
   .drop.over { border-color: var(--accent); background: rgba(91,140,255,.08); }
@@ -87,6 +91,29 @@
   dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 14px;
            width: min(820px, calc(100% - 32px)); max-height: 80vh; padding: 16px; }
   dialog::backdrop { background: rgba(0,0,0,.6); }
+
+  /* Sign-in */
+  .google { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 14px;
+            border-radius: 10px; background: #fff; color: #1f1f1f; font-weight: 600; text-decoration: none; }
+  .or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 14px 0 10px; }
+  .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+  .role { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--panel2);
+          border: 1px solid var(--line); text-transform: uppercase; letter-spacing: .04em; }
+
+  /* Quality tab */
+  .bar { height: 8px; border-radius: 999px; background: var(--panel2); overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--good); }
+  .pass { color: var(--good); font-weight: 700; } .fail { color: var(--bad); font-weight: 700; }
+  tr.click { cursor: pointer; } tr.click:hover td { background: var(--panel2); }
+  .span { display: grid; grid-template-columns: 110px 1fr 70px; gap: 8px; align-items: center; font-size: 12px; margin: 3px 0; }
+  .span .track { position: relative; height: 10px; background: var(--panel2); border-radius: 4px; }
+  .span .track i { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--accent); min-width: 2px; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 4px 10px; font-size: 13px; }
+  .kv b { color: var(--muted); font-weight: 500; }
+  pre.json { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--panel2);
+             padding: 8px; border-radius: 8px; max-height: 240px; overflow: auto; }
+  .userform { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .userform input:not([type=checkbox]) { flex: 1; min-width: 180px; }
 </style>
 </head>
 <body>
@@ -97,7 +124,10 @@
     <div id="tabs" class="tabs hidden">
       <button id="tab-kb" class="active" onclick="showTab('kb')">Knowledge</button>
       <button id="tab-dash" onclick="showTab('dash')">Sales dashboard</button>
+      <button id="tab-quality" onclick="showTab('quality')">Quality</button>
+      <button id="tab-users" onclick="showTab('users')">Users</button>
     </div>
+    <span id="who" class="small muted"></span>
     <button id="logout" class="ghost hidden">Log out</button>
   </div>
 </header>
@@ -105,13 +135,21 @@
 <main>
   <!-- ---------------- Login ---------------- -->
   <section id="login" class="card">
-    <h3>Admin login</h3>
+    <h3>Staff sign-in</h3>
+    <a id="googleBtn" class="google hidden" href="/api/auth/google/start">
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+      Sign in with Google
+    </a>
+    <div id="orLine" class="or hidden"><span>or break-glass password</span></div>
     <form id="loginForm">
-      <input id="password" type="password" placeholder="Admin password" autocomplete="current-password" required>
+      <div class="pw">
+        <input id="password" type="password" placeholder="Admin password" autocomplete="off" spellcheck="false" required>
+        <button type="button" id="pwToggle" class="ghost" aria-label="Show password">Show</button>
+      </div>
       <button class="primary" type="submit">Log in</button>
       <div id="loginErr" class="err"></div>
     </form>
-    <p class="small muted">The password is <code>ADMIN_PASSWORD</code> in the server's <code>.env</code> file.</p>
+    <p id="pwHint" class="small muted">The password is <code>ADMIN_PASSWORD</code> in the server's <code>.env</code> file. It signs you in as admin.</p>
   </section>
 
   <!-- ---------------- Admin app ---------------- -->
@@ -143,8 +181,8 @@
         <h3><span class="badge public">PUBLIC</span> &nbsp;Agent can use</h3>
         <div id="list-public"></div>
       </div>
-      <div class="card">
-        <h3><span class="badge internal">INTERNAL</span> &nbsp;Confidential, admin only</h3>
+      <div class="card" id="internalCard">
+        <h3><span class="badge internal">INTERNAL</span> &nbsp;Confidential, managers + admins</h3>
         <div id="list-internal"></div>
       </div>
     </div>
@@ -176,6 +214,39 @@
     </div>
     <div class="card"><h3>Call summaries</h3><div id="calls"></div></div>
   </section>
+
+  <!-- ---------------- Quality: observability + evals ---------------- -->
+  <section id="quality" class="hidden stack">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h2 style="margin:0;font-size:18px">Quality · last 500 turns</h2>
+      <button class="ghost" onclick="loadQuality()">↻ Refresh</button>
+    </div>
+    <div class="stats" id="qStats"></div>
+    <div class="grid2">
+      <div class="card"><h3>Evals (golden conversations)</h3><div id="qEval"></div></div>
+      <div class="card"><h3>Routing · models · guardrails</h3><div id="qMix"></div></div>
+    </div>
+    <div class="card"><h3>Recent turns (click for the trace)</h3><div id="qTraces" class="scroll-x"></div></div>
+    <div class="card" id="auditCard"><h3>Audit log</h3><div id="qAudit" class="scroll-x"></div></div>
+  </section>
+
+  <!-- ---------------- Users (RBAC) ---------------- -->
+  <section id="users" class="hidden stack">
+    <div class="card">
+      <h3>Add or change a user</h3>
+      <form id="userForm" class="userform">
+        <input id="uEmail" type="email" placeholder="name@company.com" required>
+        <input id="uName" placeholder="Name (optional)">
+        <select id="uRole"><option value="sales_rep">sales_rep</option><option value="manager">manager</option>
+          <option value="viewer">viewer</option><option value="admin">admin</option></select>
+        <label class="small"><input id="uActive" type="checkbox" checked> active</label>
+        <button class="primary" type="submit">Save</button>
+      </form>
+      <p class="small muted">People sign in with Google using this email. Unticking "active" removes their access immediately.</p>
+    </div>
+    <div class="card"><h3>Users</h3><div id="uList" class="scroll-x"></div></div>
+    <div class="card"><h3>What each role can do</h3><div id="uRoles"></div></div>
+  </section>
 </main>
 
 <dialog id="preview">
@@ -204,7 +275,7 @@ async function api(path, { method = "GET", body } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = "Bearer " + token;
   const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
-  if (res.status === 401 && path !== "/api/admin/login") { saveToken(null); showLogin("Session expired, please log in again."); throw new Error("Not logged in"); }
+  if (res.status === 401 && path !== "/api/auth/login") { saveToken(null); showLogin("Session expired, please log in again."); throw new Error("Not logged in"); }
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
   return res.json();
 }
@@ -216,26 +287,51 @@ function toast(msg, bad = false) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), 4000);
 }
 
+// ---------------- Who am I (RBAC) ----------------
+// The server enforces every permission; the page only hides what you can't use.
+let me = null;
+const can = (p) => !!me && me.permissions.includes(p);
+const TABS = { kb: "docs:read", dash: "dashboard:read", quality: "quality:read", users: "users:manage" };
+const SECTION = { kb: "app", dash: "dash", quality: "quality", users: "users" };
+
 function showLogin(msg = "") {
-  for (const id of ["app", "dash", "logout", "tabs"]) $(id).classList.add("hidden");
+  me = null;
+  for (const id of ["app", "dash", "quality", "users", "logout", "tabs"]) $(id).classList.add("hidden");
   $("login").classList.remove("hidden");
-  $("loginErr").textContent = msg; $("mode").textContent = "";
-  for (const id of ["stats", "leads", "appts", "calls"]) $(id).innerHTML = "";   // wipe customer data from the page
+  $("loginErr").textContent = msg; $("mode").textContent = ""; $("who").textContent = "";
+  // wipe customer data from the page
+  for (const id of ["stats", "leads", "appts", "calls", "qStats", "qEval", "qMix", "qTraces", "qAudit", "uList"]) $(id).innerHTML = "";
+  api("/api/auth/config").then((c) => {
+    $("googleBtn").classList.toggle("hidden", !c.google);
+    $("loginForm").classList.toggle("hidden", !c.password);
+    $("pwHint").classList.toggle("hidden", !c.password);
+    $("orLine").classList.toggle("hidden", !(c.google && c.password));
+    if (!c.google && !c.password && !msg) $("loginErr").textContent = "No sign-in method is configured. Set GOOGLE_CLIENT_ID/SECRET or ADMIN_PASSWORD in .env.";
+  }).catch(() => {});
 }
-function showApp() {
+async function showApp() {
+  me = await api("/api/auth/me");
+  $("who").innerHTML = `${esc(me.name || me.email)} <span class="role">${esc(me.role)}</span>`;
   $("login").classList.add("hidden"); $("logout").classList.remove("hidden"); $("tabs").classList.remove("hidden");
+  for (const [tab, perm] of Object.entries(TABS)) $("tab-" + tab).classList.toggle("hidden", !can(perm));
+  // Knowledge tab details
+  document.querySelector("#app > .card").classList.toggle("hidden", !can("docs:write"));        // upload box
+  $("searchScope").querySelector("option[value=internal]").hidden = !can("search:internal");
+  $("auditCard").classList.toggle("hidden", !can("audit:read"));
   let tab = "kb";
   try { tab = sessionStorage.getItem("adminTab") || "kb"; } catch (e) {}
+  if (!can(TABS[tab])) tab = Object.keys(TABS).find((t) => can(TABS[t])) || "dash";
   showTab(tab);
 }
 function showTab(name) {
-  $("app").classList.toggle("hidden", name !== "kb");
-  $("dash").classList.toggle("hidden", name !== "dash");
-  $("tab-kb").classList.toggle("active", name === "kb");
-  $("tab-dash").classList.toggle("active", name === "dash");
+  for (const t of Object.keys(TABS)) {
+    $(SECTION[t]).classList.toggle("hidden", name !== t);
+    $("tab-" + t).classList.toggle("active", name === t);
+  }
   $("mode").classList.toggle("hidden", name !== "kb");
   try { sessionStorage.setItem("adminTab", name); } catch (e) {}
-  (name === "dash" ? loadDashboard() : loadDocs()).catch((err) => toast(err.message, true));
+  const load = { kb: loadDocs, dash: loadDashboard, quality: loadQuality, users: loadUsers }[name];
+  load().catch((err) => toast(err.message, true));
 }
 
 // ---------------- Sales dashboard ----------------
@@ -251,8 +347,8 @@ async function loadDashboard() {
     d.leads.map(l => `<tr><td><b>${esc(l.name || "Unknown")}</b><br><span class="muted">${esc(l.phone)}${l.company ? " · " + esc(l.company) : ""}</span></td>
       <td><b>${esc(l.score ?? 0)}</b></td><td><span class="chip">${esc(l.status)}</span></td>
       <td class="muted">${esc(l.need || "—")}<br>${esc(l.budget || "—")} · ${esc(l.timeline || "—")}</td><td>${esc(l.language || "")}</td>
-      <td style="white-space:nowrap"><button class="ghost" style="padding:3px 9px" data-link="${esc(l.id)}">Copy</button>
-        <button class="del" data-reset="${esc(l.id)}" title="Make a new link; the old one stops working">Reset</button></td></tr>`).join("") + "</table>"
+      <td style="white-space:nowrap">${can("leads:link") ? `<button class="ghost" style="padding:3px 9px" data-link="${esc(l.id)}">Copy</button>
+        <button class="del" data-reset="${esc(l.id)}" title="Make a new link; the old one stops working">Reset</button>` : "—"}</td></tr>`).join("") + "</table>"
     : "<p class='muted'>No leads yet. Make a call first.</p>";
 
   // Only allow http(s) links, so a bad value can't become a javascript: link.
@@ -276,15 +372,28 @@ async function loadDashboard() {
   }).join("") : "<p class='muted'>No calls yet.</p>";
 }
 
+$("pwToggle").onclick = () => {
+  const show = $("password").type === "password";
+  $("password").type = show ? "text" : "password";
+  $("pwToggle").textContent = show ? "Hide" : "Show";
+  $("pwToggle").setAttribute("aria-label", show ? "Hide password" : "Show password");
+  $("password").focus();
+};
+
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("loginErr").textContent = "";
   try {
-    const r = await api("/api/admin/login", { method: "POST", body: { password: $("password").value } });
-    saveToken(r.token); $("password").value = ""; showApp();
-  } catch (err) { $("loginErr").textContent = err.message; }
+    // trim(): a pasted password often carries a space or line break at the end.
+    const r = await api("/api/auth/login", { method: "POST", body: { password: $("password").value.trim() } });
+    saveToken(r.token); $("password").value = ""; $("password").type = "password"; $("pwToggle").textContent = "Show"; showApp();
+  } catch (err) {
+    $("loginErr").textContent = err.message === "Wrong password"
+      ? "Wrong password. If your browser filled it in, click Show to check it, or clear it and paste the value from .env."
+      : err.message;
+  }
 });
-$("logout").onclick = async () => { try { await api("/api/admin/logout", { method: "POST" }); } catch (e) {} saveToken(null); showLogin(); };
+$("logout").onclick = async () => { try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {} saveToken(null); showLogin(); };
 
 // ---------------- Document lists ----------------
 const kb = (n) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB";
@@ -292,6 +401,7 @@ const kb = (n) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " 
 async function loadDocs() {
   const r = await api("/api/admin/documents");
   $("mode").textContent = `Search: public ${r.search_mode.public} · internal ${r.search_mode.internal}`;
+  $("internalCard").classList.toggle("hidden", !can("search:internal"));
   for (const scope of ["public", "internal"]) {
     const docs = r.documents[scope];
     $("list-" + scope).innerHTML = docs.length ? `<table>
@@ -299,7 +409,7 @@ async function loadDocs() {
       ${docs.map(d => `<tr>
         <td class="name"><a data-view="${esc(d.name)}" data-scope="${scope}">${esc(d.name)}</a></td>
         <td class="num muted">${kb(d.size)}</td><td class="num">${d.chunks}</td>
-        <td class="num"><button class="del" data-del="${esc(d.name)}" data-scope="${scope}">Delete</button></td>
+        <td class="num">${can("docs:write") ? `<button class="del" data-del="${esc(d.name)}" data-scope="${scope}">Delete</button>` : ""}</td>
       </tr>`).join("")}</table>` : `<p class="muted small">No documents yet.</p>`;
   }
 }
@@ -386,7 +496,120 @@ $("searchForm").addEventListener("submit", async (e) => {
   } catch (err) { $("hits").innerHTML = `<p class="err">${esc(err.message)}</p>`; }
 });
 
-token ? api("/api/admin/documents").then(showApp).catch(() => {}) : showLogin();
+// ---------------- Quality: observability + evals ----------------
+const pct = (x) => Math.round((x || 0) * 100) + "%";
+const chips = (obj) => Object.entries(obj || {}).sort((a, b) => b[1] - a[1])
+  .map(([k, v]) => `<span class="chip">${esc(k)} · ${esc(v)}</span>`).join("") || "<span class='muted small'>none yet</span>";
+
+async function loadQuality() {
+  const q = await api("/api/admin/quality");
+  const t = q.traces, e = q.eval;
+  const stat = (n, label) => `<div class="card stat"><div class="n">${n}</div><div class="muted">${label}</div></div>`;
+  $("qStats").innerHTML = stat(t.turns, "Turns traced") + stat(t.p50_ms + " ms", "p50 response") + stat(t.p95_ms + " ms", "p95 response") +
+    stat(pct(t.cache_hit_rate), "Cache hit rate") + stat(t.avg_tokens, "Avg tokens / turn") +
+    stat("$" + (t.total_cost_usd || 0).toFixed(4), "LLM cost (priced models)") + stat(t.errors, "Errors") +
+    stat(e ? pct(e.summary.pass_rate) : "–", "Eval pass rate");
+
+  $("qEval").innerHTML = !e ? `<p class="muted">No eval run yet. Run <code>python evals/run.py</code> on the server.</p>` : `
+    <div class="kv"><b>Last run</b><span>${esc(e.summary.date)}</span><b>Prompt version</b><span><code>${esc(e.summary.prompt_version)}</code></span>
+      <b>Passed</b><span>${e.summary.passed} / ${e.summary.total}</span></div>
+    <div class="bar" style="margin:10px 0"><i style="width:${pct(e.summary.pass_rate)}"></i></div>
+    <div>${chips(e.summary.by_category)}</div>
+    ${e.cases.filter(c => !c.pass).map(c => `<div class="summary-card" style="margin-top:8px"><span class="fail">FAIL</span> <b>${esc(c.id)}</b>
+      ${c.checks.filter(x => !x.pass).map(x => `<div class="small muted">✗ ${esc(x.check)}: ${esc(x.detail)}</div>`).join("")}
+      <div class="small">“${esc(c.reply || "")}”</div></div>`).join("")}
+    ${(e.history || []).length > 1 ? `<div class="small muted" style="margin-top:8px">Trend: ${e.history.map(h => pct(h.pass_rate)).join(" → ")}</div>` : ""}`;
+
+  $("qMix").innerHTML = `<div class="small muted">Route</div><div>${chips(t.routes)}</div>
+    <div class="small muted" style="margin-top:8px">Model that answered</div><div>${chips(t.models)}</div>
+    <div class="small muted" style="margin-top:8px">Guardrail hits</div><div>${chips(t.guard_hits)}</div>
+    <div class="small muted" style="margin-top:8px">Prompt versions</div><div>${chips(t.prompt_versions)}</div>
+    <div class="small muted" style="margin-top:8px">Answer cache (since restart): ${q.cache.entries} entries · ${q.cache.hits} hits · ${q.cache.semantic_hits} semantic</div>`;
+
+  const tr = await api("/api/admin/traces?limit=40");
+  $("qTraces").innerHTML = tr.traces.length ? `<table><tr><th>Time</th><th>Customer said</th><th>Route</th><th>Model</th><th class="num">ms</th><th class="num">Tokens</th><th>Guard</th></tr>
+    ${tr.traces.map(x => `<tr class="click" data-trace="${esc(x.id)}"><td class="muted">${esc((x.created_at || "").slice(11))}</td>
+      <td>${esc((x.input || "").slice(0, 60))}</td><td><span class="chip">${esc(x.route)}</span>${x.cache_hit ? '<span class="chip">cache</span>' : ""}</td>
+      <td class="small">${esc((x.model || "").split("/").slice(-1)[0])}</td><td class="num">${x.total_ms}</td>
+      <td class="num">${(x.input_tokens || 0) + (x.output_tokens || 0)}</td>
+      <td class="small">${(x.guard || []).map(g => esc(g.rule)).join(", ")}${x.error ? ' <span class="fail">error</span>' : ""}</td></tr>`).join("")}</table>`
+    : "<p class='muted'>No turns yet. Make a call on the main page.</p>";
+
+  if (can("audit:read")) {
+    const a = await api("/api/admin/audit?limit=50");
+    $("qAudit").innerHTML = a.audit.length ? `<table><tr><th>Time</th><th>Who</th><th>Role</th><th>Action</th><th>Detail</th></tr>
+      ${a.audit.map(x => `<tr><td class="muted">${esc(x.created_at)}</td><td>${esc(x.actor)}</td><td>${esc(x.role)}</td>
+        <td><span class="chip">${esc(x.action)}</span></td><td class="small">${esc(x.detail)}</td></tr>`).join("")}</table>`
+      : "<p class='muted'>Nothing logged yet.</p>";
+  }
+}
+
+async function showTrace(id) {
+  const t = await api(`/api/admin/traces/${encodeURIComponent(id)}`);
+  const total = Math.max(t.total_ms, 1);
+  let offset = 0;
+  const spans = t.spans.map(s => {
+    const left = Math.min(offset / total * 100, 100); offset += s.ms;
+    return `<div class="span"><span>${esc(s.name)}${s.step !== undefined ? " " + esc(s.step) : ""}${s.tool ? " · " + esc(s.tool) : ""}</span>
+      <div class="track"><i style="left:${left}%;width:${Math.min(s.ms / total * 100, 100 - left)}%"></i></div><span class="muted">${s.ms} ms</span></div>`;
+  }).join("");
+  $("previewName").textContent = `Trace ${t.id}`;
+  $("previewBadge").innerHTML = `<span class="chip">${esc(t.route)}</span>${t.cache_hit ? '<span class="chip">cache hit</span>' : ""}`;
+  $("previewText").innerHTML = `<div class="kv">
+      <b>Customer</b><span>${esc(t.input)}</span><b>Aria</b><span>${esc(t.output)}</span>
+      <b>Prompt</b><span><code>${esc(t.prompt_version)}</code></span><b>Model</b><span>${esc(t.model)}</span>
+      <b>Tokens</b><span>${t.input_tokens} in · ${t.output_tokens} out · $${(t.cost_usd || 0).toFixed(5)}</span>
+      <b>Facts used</b><span>${(t.sources || []).map(esc).join("<br>") || "—"}</span></div>
+    <h3 style="margin-top:14px">Where the ${t.total_ms} ms went</h3>${spans}
+    ${t.guard.length ? `<h3 style="margin-top:14px">Guardrails</h3>` + t.guard.map(g => `<div class="small">${esc(g.stage)} · <b>${esc(g.rule)}</b> → ${esc(g.action)} ${esc(g.detail)}</div>`).join("") : ""}
+    ${t.tools.length ? `<h3 style="margin-top:14px">Tools</h3><pre class="json">${esc(JSON.stringify(t.tools, null, 2))}</pre>` : ""}
+    <h3 style="margin-top:14px">LLM calls</h3><pre class="json">${esc(JSON.stringify(t.llm_calls, null, 2))}</pre>
+    ${t.error ? `<p class="err">${esc(t.error)}</p>` : ""}`;
+  $("preview").showModal();
+}
+document.addEventListener("click", (e) => {
+  const row = e.target.closest("[data-trace]");
+  if (row) showTrace(row.dataset.trace).catch((err) => toast(err.message, true));
+});
+
+// ---------------- Users (admin only) ----------------
+let userRows = [];
+async function loadUsers() {
+  const r = await api("/api/admin/users");
+  userRows = r.users;
+  $("uList").innerHTML = r.users.length ? `<table><tr><th>Email</th><th>Name</th><th>Role</th><th>Active</th><th>Last sign-in</th><th></th></tr>
+    ${r.users.map((u, i) => `<tr><td>${esc(u.email)}</td><td>${esc(u.name || "")}</td><td><span class="role">${esc(u.role)}</span></td>
+      <td>${u.active ? "yes" : '<span class="fail">no</span>'}</td><td class="muted">${esc(u.last_login || "never")}</td>
+      <td><button class="ghost" style="padding:3px 9px" data-edit-user="${i}">Edit</button></td></tr>`).join("")}</table>`
+    : "<p class='muted'>No users yet. Add one above, or list an email in ADMIN_EMAILS to bootstrap the first admin.</p>";
+  $("uRoles").innerHTML = Object.entries(r.roles).map(([role, perms]) =>
+    `<div style="margin-bottom:6px"><span class="role">${esc(role)}</span> ${perms.map(p => `<span class="chip">${esc(p)}</span>`).join("")}</div>`).join("");
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-edit-user]");
+  if (!b) return;
+  const u = userRows[Number(b.dataset.editUser)];
+  $("uEmail").value = u.email; $("uName").value = u.name || ""; $("uRole").value = u.role; $("uActive").checked = !!u.active;
+  $("uEmail").focus();
+});
+$("userForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api("/api/admin/users", { method: "POST", body: { email: $("uEmail").value.trim(), name: $("uName").value.trim(),
+      role: $("uRole").value, active: $("uActive").checked } });
+    toast("User saved"); $("userForm").reset(); $("uActive").checked = true; loadUsers();
+  } catch (err) { toast(err.message, true); }
+});
+
+// ---------------- Start ----------------
+// Google sign-in comes back as /admin.html#token=... (or #error=...). The fragment never reaches a server.
+(function start() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get("token")) saveToken(h.get("token"));
+  if (h.get("token") || h.get("error")) history.replaceState(null, "", location.pathname);
+  if (h.get("error")) { saveToken(null); showLogin(h.get("error")); return; }
+  token ? showApp().catch(() => {}) : showLogin();
+})();
 </script>
 </body>
 </html>

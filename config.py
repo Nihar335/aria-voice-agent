@@ -43,3 +43,48 @@ INTERNAL_KNOWLEDGE_DIR.mkdir(exist_ok=True)
 
 # --- Admin login for /admin.html (empty = admin page disabled) ---
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+
+# ===========================================================================
+# The 7-layer stack (see layers/__init__.py). Every setting has a safe default.
+# ===========================================================================
+def _flag(name: str, default: bool) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
+
+
+# --- Databases (tests and evals point these at throw-away files) ---
+CRM_DB_PATH = Path(os.getenv("CRM_DB_PATH") or DATA_DIR / "crm.db")
+OBS_DB_PATH = Path(os.getenv("OBS_DB_PATH") or DATA_DIR / "observability.db")   # traces + audit log + users
+
+# --- Layer: router. Simple turns go to the FAST models, tool/booking turns to the main list above ---
+ROUTER_ENABLED = _flag("ROUTER_ENABLED", True)
+GROQ_FAST_MODEL = os.getenv("GROQ_FAST_MODEL", "openai/gpt-oss-20b")
+GEMINI_FAST_MODEL = os.getenv("GEMINI_FAST_MODEL", "gemini-3.5-flash-lite")
+
+# --- Layer: cache. Same FAQ question again -> answer from memory, no LLM call ---
+CACHE_ENABLED = _flag("CACHE_ENABLED", True)
+CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "86400"))
+
+# --- Layer: guardrails ---
+GUARDRAILS_ENABLED = _flag("GUARDRAILS_ENABLED", True)
+MAX_TURNS_PER_MINUTE = int(os.getenv("MAX_TURNS_PER_MINUTE", "20"))     # per call
+MAX_CALLS_PER_HOUR_PER_IP = int(os.getenv("MAX_CALLS_PER_HOUR_PER_IP", "30"))
+
+# --- Layer: RBAC + OAuth (Google sign-in for the admin page) ---
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").strip().rstrip("/")
+# Emails that become "admin" the first time they sign in with Google (bootstrap the first user).
+ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+
+# --- Layer: MCP tool server (mcp_server.py) ---
+MCP_ROLE = os.getenv("MCP_ROLE", "sales_rep").strip()   # which tools an MCP client may use
+
+# --- Layer: observability. Optional prices to show cost: "model=input/output" in USD per 1M tokens ---
+MODEL_PRICES = {}
+for _item in os.getenv("MODEL_PRICES", "").split(","):
+    if "=" in _item and "/" in _item:
+        _m, _p = _item.rsplit("=", 1)
+        try:
+            MODEL_PRICES[_m.strip()] = tuple(float(x) for x in _p.split("/"))
+        except ValueError:
+            pass

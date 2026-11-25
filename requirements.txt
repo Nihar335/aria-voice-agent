@@ -1,5 +1,5 @@
 # Web server
-fastapi==0.115.6
+fastapi==0.165.0
 uvicorn[standard]==0.34.0
 # Reads API keys from the .env file
 python-dotenv==1.0.1
@@ -12,3 +12,7 @@ edge-tts==7.3.1
 numpy==2.2.1
 # Reads text out of uploaded PDF files (admin page)
 pypdf==5.1.0
+# Layer 4: serve the agent's tools over MCP (mcp_server.py)
+mcp==2.3.0
+# Layer 5: Google sign-in token exchange (also used by the MCP SDK)
+httpx==0.28.1

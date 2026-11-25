@@ -400,11 +400,15 @@ function showTurnDetails(r) {
   const L = r.latency, max = Math.max(L.total_ms, 1);
   const row = (name, ms) => `<div class="lat-row"><span>${name}</span><div class="bar"><div style="width:${Math.min(100, ms / max * 100)}%"></div></div><span>${ms} ms</span></div>`;
   $("latency").innerHTML = row("RAG", L.rag_ms) + row("LLM", L.llm_ms) + row("Voice", L.tts_ms || 0) + row("Total", L.total_ms);
-  $("provider").textContent = `LLM: ${r.provider} · voice: ${r.voice}`;
+  const tok = r.tokens ? ` · ${r.tokens.in + r.tokens.out} tokens` : "";
+  $("provider").textContent = `LLM: ${r.provider} · route: ${r.route || "-"}${tok} · voice: ${r.voice}${r.trace_id ? " · trace " + r.trace_id : ""}`;
 
-  // Reasoning trace: RAG -> tools -> thought (newest turn on top)
+  // Reasoning trace: guardrails -> RAG -> router/cache -> tools -> thought (newest turn on top)
   let html = "";
   for (const e of r.events) {
+    if (e.type === "guard") html += `<div class="step tool">🛡️ Guardrail: ${esc(e.detail)}</div>`;
+    if (e.type === "route") html += `<div class="step">🧭 Router: ${esc(e.detail)}</div>`;
+    if (e.type === "cache") html += `<div class="step rag">⚡ Cache: ${esc(e.detail)}</div>`;
     if (e.type === "rag") html += `<div class="step rag">📚 RAG: ${esc(e.detail)} (${e.ms} ms)${e.sources.length ? "<br>" + e.sources.map(s => `<span class="chip">${esc(s)}</span>`).join("") : "<br><span class='muted'>No matching facts → agent must not guess</span>"}</div>`;
     if (e.type === "tool") html += `<div class="step tool">🛠️ Tool <code>${esc(e.detail)}</code>(${esc(JSON.stringify(e.args || {}))})<br><span class="muted">→ ${esc(JSON.stringify(e.result).slice(0, 220))}</span></div>`;
   }

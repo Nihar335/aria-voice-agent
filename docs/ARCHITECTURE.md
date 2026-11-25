@@ -1,5 +1,42 @@
 # Architecture
 
+## 0. The 7-layer stack (one customer turn)
+
+```mermaid
+flowchart TB
+    IN([Customer said something]) --> G1
+    subgraph L6a["6 · Guardrails (input) - layers/guardrails.py"]
+        G1["rate limit · mask card/Aadhaar/PAN/OTP<br/>prompt injection · abuse → handoff"]
+    end
+    G1 -->|blocked| OUT
+    G1 --> R["3 · RAG - rag.py<br/>company facts + sources"]
+    R --> RT
+    subgraph L7["7 · Cache + router - layers/router.py, layers/cache.py"]
+        RT["router: faq / chat → fast model<br/>action / sensitive / kn / te → strong model"]
+        C{"FAQ answer<br/>cached?"}
+        RT --> C
+    end
+    C -->|hit, 0 LLM calls| OUT
+    C -->|miss| P["2 · System prompt - prompts/aria_system.md<br/>versioned (hash in every trace)"]
+    P --> LLM["1 · LLM call - llm.py<br/>Groq ⇄ Gemini fallback, tokens, latency"]
+    LLM <-->|tool call / result| T["4 · Tools - tools.py (JSON schema + validation)<br/>also served over MCP - mcp_server.py"]
+    T --- RB["5 · RBAC - layers/rbac.py<br/>customer role: 5 call tools only<br/>staff: Google sign-in + roles + audit log"]
+    LLM --> G2
+    subgraph L6b["6 · Guardrails (output)"]
+        G2["price / promise not in facts · fake booking · prompt leak<br/>→ regenerate once → safe fallback"]
+    end
+    G2 --> OUT([Reply spoken to customer])
+    OUT -.-> OBS["8 · Observability - layers/observability.py<br/>1 trace per turn: spans, tokens, cost, guard hits<br/>+ evals/run.py golden conversations"]
+```
+
+| Layer | Fails safe how |
+|---|---|
+| Guardrails | Code, not prompt: a regex/number check can't be talked out of its rule. One regeneration, then a fixed safe reply |
+| Router | Fast tier falls back to the strong list; a tool call switches the rest of the turn to the strong model; empty reply → retry on strong |
+| Cache | Key includes knowledge-base hash + prompt version, so new prices or prompt edits invalidate it; only tool-free, guard-clean, impersonal answers are stored |
+| RBAC | The page hides what you can't use, but every route and every tool call is checked on the server; role changes apply immediately |
+| Observability | A trace write can never break a call (errors are logged, not raised) |
+
 ## 1. MVP architecture (what runs today)
 
 ```mermaid

@@ -15,7 +15,7 @@ from datetime import datetime
 
 import config
 
-DB_FILE = config.DATA_DIR / "crm.db"
+DB_FILE = config.CRM_DB_PATH
 
 
 # ---------------------------------------------------------------------------

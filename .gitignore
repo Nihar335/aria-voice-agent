@@ -8,3 +8,4 @@ learn/
 voice_samples/
 knowledge_internal/
 data/rag_index*.json
+data/evals/

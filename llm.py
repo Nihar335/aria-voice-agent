@@ -27,6 +27,15 @@ class LLMResult:
     text: str          # the model's answer
     provider: str      # e.g. "groq/qwen/qwen3.8-27b" (who actually answered)
     latency_ms: int    # how long the call took
+    input_tokens: int = 0      # tokens we sent (from the provider, or estimated)
+    output_tokens: int = 0     # tokens the model wrote
+    failed: tuple = ()         # models that failed before this one answered (for traces)
+    tier: str = "strong"       # which model list the router picked
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough count when a provider does not report usage: ~4 characters per token."""
+    return max(1, len(text) // 4)
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +44,7 @@ class LLMResult:
 _gemini_client = None  # created once, then reused (faster)
 
 
-def _call_gemini(model: str, system: str, messages: list, json_mode: bool, temperature: float) -> str:
+def _call_gemini(model: str, system: str, messages: list, json_mode: bool, temperature: float) -> tuple[str, dict]:
     global _gemini_client
     from google import genai
     from google.genai import types
@@ -60,7 +69,9 @@ def _call_gemini(model: str, system: str, messages: list, json_mode: bool, tempe
     response = _gemini_client.models.generate_content(
         model=model, contents=contents, config=settings
     )
-    return response.text or ""
+    u = getattr(response, "usage_metadata", None)
+    usage = {"in": getattr(u, "prompt_token_count", 0) or 0, "out": getattr(u, "candidates_token_count", 0) or 0}
+    return response.text or "", usage
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +80,7 @@ def _call_gemini(model: str, system: str, messages: list, json_mode: bool, tempe
 _groq_client = None
 
 
-def _call_groq(model: str, system: str, messages: list, json_mode: bool, temperature: float) -> str:
+def _call_groq(model: str, system: str, messages: list, json_mode: bool, temperature: float) -> tuple[str, dict]:
     global _groq_client
     from groq import Groq
 
@@ -96,25 +107,38 @@ def _call_groq(model: str, system: str, messages: list, json_mode: bool, tempera
         body = getattr(e, "body", None) or {}
         failed = (body.get("error") or {}).get("failed_generation") if isinstance(body, dict) else None
         if failed:
-            return failed
+            return failed, {}
         raise
-    return response.choices[0].message.content or ""
+    u = getattr(response, "usage", None)
+    usage = {"in": getattr(u, "prompt_tokens", 0) or 0, "out": getattr(u, "completion_tokens", 0) or 0}
+    return response.choices[0].message.content or "", usage
 
 
 PROVIDERS = {"gemini": _call_gemini, "groq": _call_groq}
 
 
-def _models(provider: str) -> list[str]:
-    """The models listed in .env for this provider, in order (comma-separated)."""
-    value = config.GEMINI_MODEL if provider == "gemini" else config.GROQ_MODEL
+def _split(value: str) -> list[str]:
     return [m.strip() for m in value.split(",") if m.strip()]
+
+
+def _models(provider: str, tier: str = "strong") -> list[str]:
+    """
+    The models listed in .env for this provider, in order (comma-separated).
+    tier="fast" (chosen by the router for simple turns) tries the small, cheap models
+    first and still falls back to the strong list, so a turn never fails because of it.
+    """
+    strong = _split(config.GEMINI_MODEL if provider == "gemini" else config.GROQ_MODEL)
+    if tier != "fast":
+        return strong
+    fast = _split(config.GEMINI_FAST_MODEL if provider == "gemini" else config.GROQ_FAST_MODEL)
+    return fast + [m for m in strong if m not in fast]
 
 
 # ---------------------------------------------------------------------------
 # The function the whole app uses
 # ---------------------------------------------------------------------------
 def chat(system: str, messages: list, json_mode: bool = False, temperature: float = 0.4,
-         prefer: str | None = None) -> LLMResult:
+         prefer: str | None = None, tier: str = "strong") -> LLMResult:
     """
     Send a conversation to the LLM and get the answer back.
 
@@ -124,6 +148,7 @@ def chat(system: str, messages: list, json_mode: bool = False, temperature: floa
     temperature -> 0 = always the same answer, 1 = more creative
     prefer      -> try this provider first (e.g. background analysis uses "gemini",
                    so it does not use up the Groq limits the live call needs)
+    tier        -> "fast" or "strong" model list (picked by layers/router.py)
     """
     # Try the chosen provider first, then the other one as backup.
     first = prefer or config.LLM_PROVIDER
@@ -132,11 +157,15 @@ def chat(system: str, messages: list, json_mode: bool = False, temperature: floa
     errors = []
     start = time.perf_counter()     # latency includes any failed attempts (honest number)
     for name in order:
-        for model in _models(name):
+        for model in _models(name, tier):
             try:
-                text = PROVIDERS[name](model, system, messages, json_mode, temperature)
+                text, usage = PROVIDERS[name](model, system, messages, json_mode, temperature)
                 latency = int((time.perf_counter() - start) * 1000)
-                return LLMResult(text=text.strip(), provider=f"{name}/{model}", latency_ms=latency)
+                sent = system + "".join(m["content"] for m in messages)
+                return LLMResult(text=text.strip(), provider=f"{name}/{model}", latency_ms=latency,
+                                 input_tokens=usage.get("in") or _estimate_tokens(sent),
+                                 output_tokens=usage.get("out") or _estimate_tokens(text),
+                                 failed=tuple(errors), tier=tier)
             except Exception as e:  # overloaded, rate limit, no key, network error...
                 errors.append(f"{name}/{model}: {str(e)[:120]}")
                 print(f"[llm] {name}/{model} failed, trying backup. Reason: {str(e)[:120]}")
@@ -145,12 +174,12 @@ def chat(system: str, messages: list, json_mode: bool = False, temperature: floa
 
 
 def chat_json(system: str, messages: list, temperature: float = 0.2,
-              prefer: str | None = None) -> tuple[dict, LLMResult]:
+              prefer: str | None = None, tier: str = "strong") -> tuple[dict, LLMResult]:
     """
     Same as chat(), but returns a Python dict.
     Used for tool calls, lead scoring, summaries - anything the code must read.
     """
-    result = chat(system, messages, json_mode=True, temperature=temperature, prefer=prefer)
+    result = chat(system, messages, json_mode=True, temperature=temperature, prefer=prefer, tier=tier)
     text = result.text
     # Some models wrap JSON in ```json ... ``` - remove that if present.
     if text.startswith("```"):

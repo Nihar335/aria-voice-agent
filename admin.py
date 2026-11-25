@@ -2,74 +2,41 @@
 admin.py - the admin API behind /admin.html: upload, list, delete and test-search
 knowledge files.
 
-Who sees what:
+Who sees what (RBAC, layers/rbac.py):
   client page (index.html) -> talks to the voice agent, which reads ONLY the public
                               knowledge base. No /api/admin/... call works without a token.
-  admin page  (admin.html) -> logs in with ADMIN_PASSWORD (from .env), gets a token,
-                              and can manage both the public and the internal (confidential)
-                              collections.
+  admin page  (admin.html) -> staff sign in with Google (or the break-glass ADMIN_PASSWORD).
+                              Each route checks a permission: sales reps can't open confidential
+                              files, only managers/admins can upload or delete, only admins manage users.
+  Every change is written to the audit log (layers/observability.py).
 
 Confidential files live in knowledge_internal/, which is not inside frontend/, so the
 web server never serves them as files, and the agent never loads them into its prompt.
 """
 import base64
 import io
+import json
 import re
-import secrets
-import time
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 import config
+from layers import cache
+from layers.observability import audit, get_trace, list_audit, list_traces, stats
+from layers.rbac import can, require
 from rag import SCOPES, get_kb, list_documents, load_chunks, reload_kb
 
 router = APIRouter(prefix="/api/admin")
 
-TOKEN_TTL = 8 * 3600               # admin stays logged in for 8 hours
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-_tokens: dict[str, float] = {}      # token -> expiry time (in memory: a server restart logs everyone out)
-_failed: dict[str, list[float]] = {}
 
 
-# ---------------------------------------------------------------------------
-# Login
-# ---------------------------------------------------------------------------
-class Login(BaseModel):
-    password: str = Field(..., max_length=200)
-
-
-@router.post("/login")
-def login(body: Login):
-    if not config.ADMIN_PASSWORD:
-        raise HTTPException(503, "Admin page is disabled. Set ADMIN_PASSWORD in .env and restart.")
-    recent = [t for t in _failed.get("all", []) if t > time.time() - 300]
-    if len(recent) >= 10:
-        raise HTTPException(429, "Too many wrong passwords. Try again in 5 minutes.")
-    # compare_digest takes the same time for right and wrong guesses (no timing leak).
-    if not secrets.compare_digest(body.password.encode(), config.ADMIN_PASSWORD.encode()):
-        _failed["all"] = recent + [time.time()]
-        raise HTTPException(401, "Wrong password")
-    token = secrets.token_urlsafe(32)
-    _tokens[token] = time.time() + TOKEN_TTL
-    return {"token": token, "expires_in": TOKEN_TTL}
-
-
-def require_admin(authorization: str = Header("")) -> str:
-    """Every admin route depends on this: no valid 'Bearer <token>' header -> 401."""
-    token = authorization.removeprefix("Bearer ").strip()
-    expiry = _tokens.get(token)
-    if not token or not expiry or expiry < time.time():
-        _tokens.pop(token, None)
-        raise HTTPException(401, "Please log in again")
-    return token
-
-
-@router.post("/logout")
-def logout(token: str = Depends(require_admin)):
-    _tokens.pop(token, None)
-    return {"ok": True}
+def _check_scope(user: dict, scope: str):
+    """RBAC: confidential documents need the search:internal permission (manager / admin)."""
+    if scope == "internal" and not can(user["role"], "search:internal"):
+        raise HTTPException(403, f"Your role ({user['role']}) can't open confidential documents")
 
 
 # ---------------------------------------------------------------------------
@@ -82,9 +49,12 @@ def _scope(scope: str) -> str:
 
 
 @router.get("/documents")
-def documents(_: str = Depends(require_admin)):
+def documents(user: dict = Depends(require("docs:read"))):
     out = {}
     for scope in SCOPES:
+        if scope == "internal" and not can(user["role"], "search:internal"):
+            out[scope] = []
+            continue
         counts = {}
         for c in get_kb(scope).chunks:
             name = c["source"].split(" > ")[0]
@@ -128,7 +98,7 @@ def _to_text(raw: bytes, ext: str) -> str:
 
 
 @router.post("/documents")
-async def upload(body: Upload, _: str = Depends(require_admin)):
+async def upload(body: Upload, user: dict = Depends(require("docs:write"))):
     scope = _scope(body.scope)
     stem, ext = _safe_name(body.filename)
     try:
@@ -150,12 +120,13 @@ async def upload(body: Upload, _: str = Depends(require_admin)):
     replaced = target.exists()
     target.write_text(text, encoding="utf-8")
     kb = await run_in_threadpool(reload_kb, scope)
+    audit(user["email"], user["role"], "doc_upload", f"{scope}/{target.name} replaced={replaced}")
     chunks = sum(1 for c in kb.chunks if c["source"].startswith(target.name + " > "))
     return {"name": target.name, "scope": scope, "chunks": chunks, "replaced": replaced, "search_mode": kb.mode}
 
 
 @router.delete("/documents/{scope}/{name}")
-async def delete(scope: str, name: str, _: str = Depends(require_admin)):
+async def delete(scope: str, name: str, user: dict = Depends(require("docs:write"))):
     scope = _scope(scope)
     # Only delete a file that is actually in the list (no path tricks possible).
     match = next((p for p in list_documents(scope) if p.name == name), None)
@@ -163,12 +134,14 @@ async def delete(scope: str, name: str, _: str = Depends(require_admin)):
         raise HTTPException(404, "Document not found")
     match.unlink()
     await run_in_threadpool(reload_kb, scope)
+    audit(user["email"], user["role"], "doc_delete", f"{scope}/{name}")
     return {"deleted": name, "scope": scope}
 
 
 @router.get("/documents/{scope}/{name}")
-def preview(scope: str, name: str, _: str = Depends(require_admin)):
+def preview(scope: str, name: str, user: dict = Depends(require("docs:read"))):
     scope = _scope(scope)
+    _check_scope(user, scope)
     match = next((p for p in list_documents(scope) if p.name == name), None)
     if not match:
         raise HTTPException(404, "Document not found")
@@ -183,9 +156,10 @@ class Search(BaseModel):
 
 
 @router.post("/search")
-async def search(body: Search, _: str = Depends(require_admin)):
+async def search(body: Search, user: dict = Depends(require("search:public"))):
     """Test what the agent would find (public) or look things up in confidential docs (internal)."""
     scope = _scope(body.scope)
+    _check_scope(user, scope)
     hits = await run_in_threadpool(get_kb(scope).search, body.query, body.k)
     return {"scope": scope, "mode": get_kb(scope).mode, "hits": hits}
 
@@ -198,10 +172,49 @@ class PortalLink(BaseModel):
 
 
 @router.post("/leads/{lead_id}/portal-link")
-def portal_link(lead_id: int, body: PortalLink, _: str = Depends(require_admin)):
+def portal_link(lead_id: int, body: PortalLink, user: dict = Depends(require("leads:link"))):
     from crm import get_crm
     try:
         token = get_crm().portal_token(lead_id, reset=body.reset)
     except KeyError:
         raise HTTPException(404, "Lead not found")
+    audit(user["email"], user["role"], "portal_link_reset" if body.reset else "portal_link", f"lead {lead_id}")
     return {"lead_id": lead_id, "path": f"/my-calls.html#{token}", "reset": body.reset}
+
+
+# ---------------------------------------------------------------------------
+# Quality: observability (traces) + evals + audit log
+# ---------------------------------------------------------------------------
+EVAL_DIR = config.DATA_DIR / "evals"
+
+
+def latest_eval() -> dict | None:
+    reports = sorted(EVAL_DIR.glob("report_*.json")) if EVAL_DIR.exists() else []
+    if not reports:
+        return None
+    r = json.loads(reports[-1].read_text(encoding="utf-8"))
+    history = [json.loads(p.read_text(encoding="utf-8"))["summary"] for p in reports[-10:]]
+    return {**r, "history": history}
+
+
+@router.get("/quality")
+def quality(_: dict = Depends(require("quality:read"))):
+    return {"traces": stats(), "cache": cache.stats(), "eval": latest_eval()}
+
+
+@router.get("/traces")
+def traces(limit: int = 50, session_id: str | None = None, _: dict = Depends(require("quality:read"))):
+    return {"traces": list_traces(min(limit, 200), session_id)}
+
+
+@router.get("/traces/{trace_id}")
+def trace(trace_id: str, _: dict = Depends(require("quality:read"))):
+    t = get_trace(trace_id)
+    if not t:
+        raise HTTPException(404, "Trace not found")
+    return t
+
+
+@router.get("/audit")
+def audit_log(limit: int = 100, _: dict = Depends(require("audit:read"))):
+    return {"audit": list_audit(min(limit, 500))}
