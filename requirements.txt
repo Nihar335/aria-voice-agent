@@ -1,0 +1,12 @@
+# Web server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+# Reads API keys from the .env file
+python-dotenv==1.0.1
+# LLM providers (both have free tiers)
+google-genai==1.2.0
+groq==0.15.0
+# Text-to-speech (free Microsoft Edge neural voices)
+edge-tts==7.3.1
+# Maths for RAG similarity search
+numpy==2.2.1

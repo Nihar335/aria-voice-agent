@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aria · Fortivex AI Sales Voice Agent</title>
+<style>
+  /* ---------- Colours and basics ---------- */
+  :root {
+    --bg: #0b1020; --panel: #131a2e; --panel2: #1a2340; --line: #26314f;
+    --text: #e7ecf7; --muted: #8b97b5; --accent: #5b8cff; --accent2: #7c5cff;
+    --good: #2ecc8f; --warn: #f5b74e; --bad: #ff5d6c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 24px;
+           border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 17px; margin: 0; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  .tabs { margin-left: auto; display: flex; gap: 6px; }
+  .tabs button { background: none; border: 1px solid var(--line); color: var(--muted);
+                 padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+  .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #health { font-size: 12px; color: var(--muted); }
+  main { padding: 20px 24px; }
+  .hidden { display: none !important; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .card h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  button.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff;
+                   border: 0; padding: 10px 18px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+  button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+                 padding: 9px 14px; border-radius: 10px; cursor: pointer; }
+  button.danger { background: var(--bad); color: #fff; border: 0; padding: 10px 18px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+  input, select { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+                  border-radius: 10px; padding: 9px 12px; font: inherit; }
+  .chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px;
+          background: var(--panel2); border: 1px solid var(--line); margin: 2px 4px 2px 0; }
+  .muted { color: var(--muted); }
+
+  /* ---------- Live call layout: call screen | cockpit ---------- */
+  .call-layout { display: grid; grid-template-columns: minmax(340px, 1fr) minmax(380px, 1.15fr); gap: 18px; }
+  @media (max-width: 900px) { .call-layout { grid-template-columns: 1fr; } }
+
+  /* Call screen */
+  .phone { display: flex; flex-direction: column; height: calc(100vh - 120px); min-height: 520px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .banner { margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
+  .banner.memory { background: rgba(124,92,255,.15); border: 1px solid var(--accent2); }
+  .banner.handoff { background: rgba(255,93,108,.15); border: 1px solid var(--bad); }
+  .banner.booked { background: rgba(46,204,143,.15); border: 1px solid var(--good); }
+  .banner a { color: var(--accent); }
+  #chat { flex: 1; overflow-y: auto; margin: 12px 0; padding-right: 4px; }
+  .msg { max-width: 85%; padding: 10px 13px; border-radius: 14px; margin: 8px 0; white-space: pre-wrap; }
+  .msg.agent { background: var(--panel2); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .msg.customer { background: var(--accent); color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+  .msg .meta { font-size: 11px; opacity: .7; margin-top: 5px; }
+  .talk { display: flex; gap: 8px; align-items: center; }
+  .talk input { flex: 1; }
+  #mic { width: 56px; height: 56px; border-radius: 50%; border: 0; cursor: pointer; font-size: 22px;
+         background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; flex: none; }
+  #mic.listening { background: var(--bad); animation: pulse 1.2s infinite; }
+  #mic:disabled { opacity: .4; cursor: default; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,93,108,.6); } 100% { box-shadow: 0 0 0 16px rgba(255,93,108,0); } }
+  #status { font-size: 12px; color: var(--muted); min-height: 18px; margin-top: 6px; }
+
+  /* Cockpit */
+  .cockpit { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-content: start; }
+  .cockpit .wide { grid-column: span 2; }
+  .score { font-size: 44px; font-weight: 700; line-height: 1; }
+  .tier { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; text-transform: uppercase; }
+  .tier.hot { background: var(--bad); } .tier.warm { background: var(--warn); color: #222; } .tier.cold { background: var(--line); }
+  .bant-row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
+  .bant-row:last-child { border: 0; }
+  .st-clear { color: var(--good); } .st-partial { color: var(--warn); } .st-unknown { color: var(--muted); }
+  .sent { font-size: 20px; font-weight: 700; text-transform: capitalize; }
+  .lat-row { display: grid; grid-template-columns: 46px 1fr 62px; gap: 8px; align-items: center; margin: 4px 0; font-size: 12px; }
+  .bar { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; }
+  .bar div { height: 100%; background: var(--accent); }
+  #trace { max-height: 240px; overflow-y: auto; font-size: 12.5px; }
+  .step { border-left: 2px solid var(--accent); padding: 4px 10px; margin: 6px 0; }
+  .step.tool { border-color: var(--warn); } .step.rag { border-color: var(--good); }
+  .step code { color: var(--warn); }
+  .alert { color: var(--bad); font-weight: 600; }
+
+  /* ---------- Dashboard ---------- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .stat .n { font-size: 28px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .grid2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; margin-bottom: 18px; }
+  @media (max-width: 1000px) { .grid2 { grid-template-columns: 1fr; } }
+  .summary-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; background: var(--panel2); }
+  a { color: var(--accent); }
+
+  /* End-of-call summary popup */
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  #modal .card { max-width: 620px; width: 92%; max-height: 85vh; overflow-y: auto; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Aria <span>· Fortivex AI Autonomous Sales Voice Agent</span></h1>
+  <span id="health">checking…</span>
+  <div class="tabs">
+    <button id="tab-call" class="active" onclick="showTab('call')">Live call</button>
+    <button id="tab-dash" onclick="showTab('dash')">Insights dashboard</button>
+  </div>
+</header>
+
+<main>
+  <!-- =============================== LIVE CALL =============================== -->
+  <section id="view-call" class="call-layout">
+
+    <!-- Left: the call screen -->
+    <div class="card phone">
+      <div class="controls">
+        <input id="phone" placeholder="Caller phone number" value="9876543210" style="width:170px">
+        <select id="lang" title="Speech recognition language">
+          <option value="en-IN">English / Hinglish</option>
+          <option value="hi-IN">हिन्दी Hindi</option>
+          <option value="kn-IN">ಕನ್ನಡ Kannada</option>
+          <option value="te-IN">తెలుగు Telugu</option>
+        </select>
+        <label class="muted" title="Off = browser voice, much faster"><input type="checkbox" id="natural" checked> Natural voice</label>
+        <label class="muted"><input type="checkbox" id="handsfree" checked> Hands-free</label>
+        <span style="flex:1"></span>
+        <button id="startBtn" class="primary" onclick="startCall()">📞 Start call</button>
+        <button id="endBtn" class="danger hidden" onclick="endCall()">End call</button>
+      </div>
+      <div id="banners"></div>
+      <div id="chat"><p class="muted">Press <b>Start call</b>, allow the microphone, and talk to Aria like a customer.
+        Try: “I run a dental clinic, can AI answer my calls?”, “kitna kharcha hoga?”, “book a demo tomorrow”.</p></div>
+      <div class="talk">
+        <button id="mic" onclick="toggleMic()" disabled title="Click to talk">🎙️</button>
+        <input id="typed" placeholder="…or type a message and press Enter" disabled
+               onkeydown="if(event.key==='Enter'){sendTyped()}">
+      </div>
+      <div id="status"></div>
+    </div>
+
+    <!-- Right: the live cockpit (what the agent is thinking) -->
+    <div class="cockpit">
+      <div class="card">
+        <h3>Lead score</h3>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="score" id="score">–</div><span id="tier" class="tier cold">cold</span>
+        </div>
+        <div class="muted" id="intent" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <h3>Sentiment</h3>
+        <div class="sent" id="sentiment">–</div>
+        <div class="muted" id="emotion"></div>
+        <svg id="spark" width="100%" height="40" viewBox="0 0 200 40" preserveAspectRatio="none"></svg>
+        <div class="alert" id="alert"></div>
+      </div>
+      <div class="card">
+        <h3>BANT qualification</h3>
+        <div id="bant"><p class="muted">Updates after each customer turn.</p></div>
+      </div>
+      <div class="card">
+        <h3>Latency (last turn)</h3>
+        <div id="latency"><p class="muted">No turns yet.</p></div>
+        <div class="muted" id="provider" style="font-size:12px"></div>
+      </div>
+      <div class="card wide">
+        <h3>Agent reasoning &amp; actions</h3>
+        <div id="trace"><p class="muted">Each turn shows: facts retrieved (RAG) → tools used → the agent's thought.</p></div>
+      </div>
+      <div class="card wide">
+        <h3>Insights</h3>
+        <div id="insights" class="muted">Buying signals, objections and the next best action appear here.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =============================== DASHBOARD =============================== -->
+  <section id="view-dash" class="hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h2 style="margin:0;font-size:18px">Sales insights</h2>
+      <button class="ghost" onclick="loadDashboard()">↻ Refresh</button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="grid2">
+      <div class="card"><h3>Leads (CRM)</h3><div id="leads"></div></div>
+      <div class="card"><h3>Booked demos</h3><div id="appts"></div></div>
+    </div>
+    <div class="card"><h3>Call summaries</h3><div id="calls"></div></div>
+  </section>
+</main>
+
+<div id="modal" class="hidden"><div class="card" id="modalBody"></div></div>
+
+<script>
+// ============================================================================
+// Small helpers
+// ============================================================================
+const $ = (id) => document.getElementById(id);
+
+// Escape text before putting it into HTML (stops script injection / XSS).
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function api(path, body) {
+  const res = await fetch(path, body ? {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  } : {});
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+  return res.json();
+}
+
+function showTab(name) {
+  $("view-call").classList.toggle("hidden", name !== "call");
+  $("view-dash").classList.toggle("hidden", name !== "dash");
+  $("tab-call").classList.toggle("active", name === "call");
+  $("tab-dash").classList.toggle("active", name === "dash");
+  if (name === "dash") loadDashboard();
+}
+
+// Agent language -> speech codes for the microphone and the browser voice.
+const SPEECH_CODE = { en: "en-IN", hinglish: "en-IN", hi: "hi-IN", kn: "kn-IN", te: "te-IN" };
+
+// ============================================================================
+// Call state
+// ============================================================================
+let sessionId = null;
+let busy = false;          // waiting for the agent's reply
+let speaking = false;      // agent audio is playing
+let currentAudio = null;
+let pollTimer = null;
+
+// ============================================================================
+// 1. Start / end the call
+// ============================================================================
+async function startCall() {
+  $("startBtn").disabled = true;
+  setStatus("Connecting…");
+  try {
+    const r = await api("/api/call/start", { phone: $("phone").value });
+    sessionId = r.session_id;
+    $("chat").innerHTML = ""; $("trace").innerHTML = ""; $("banners").innerHTML = "";
+    resetCockpit();
+    if (r.returning && r.previous) {
+      addBanner("memory", `🧠 Returning caller${r.lead.name ? " — " + esc(r.lead.name) : ""}. Memory from ${esc(r.previous.date.slice(0, 10))}: ${esc(r.previous.summary)}`);
+    }
+    $("startBtn").classList.add("hidden"); $("endBtn").classList.remove("hidden");
+    $("mic").disabled = false; $("typed").disabled = false;
+    addMessage("agent", r.reply, r.voice ? `voice: ${r.voice}` : "");
+    pollTimer = setInterval(pollLive, 1200);
+    await speak(r);
+  } catch (e) {
+    setStatus("Could not start: " + e.message);
+  }
+  $("startBtn").disabled = false;
+}
+
+async function endCall() {
+  if (!sessionId) return;
+  stopListening(); stopAudio(); clearInterval(pollTimer);
+  setStatus("Writing call summary…");
+  const id = sessionId; sessionId = null;
+  $("mic").disabled = true; $("typed").disabled = true;
+  $("endBtn").classList.add("hidden"); $("startBtn").classList.remove("hidden");
+  try {
+    const r = await api("/api/call/end", { session_id: id });
+    showSummary(r.summary, r.lead);
+    setStatus("Call ended and saved to CRM.");
+  } catch (e) { setStatus("End failed: " + e.message); }
+}
+
+// ============================================================================
+// 2. Send what the customer said, show + speak the reply
+// ============================================================================
+async function sendTurn(text) {
+  text = text.trim();
+  if (!text || !sessionId || busy) return;
+  busy = true; stopAudio();
+  addMessage("customer", text);
+  setStatus("Aria is thinking…");
+  try {
+    const r = await api("/api/call/turn", { session_id: sessionId, text, natural_voice: $("natural").checked });
+    const meta = [r.language, r.sources.length ? "📄 " + r.sources.length + " source(s)" : ""].filter(Boolean).join(" · ");
+    addMessage("agent", r.reply, meta);
+    showTurnDetails(r);
+    // If the customer switched language, switch the microphone too.
+    if (SPEECH_CODE[r.language]) $("lang").value = SPEECH_CODE[r.language];
+    busy = false;
+    await speak(r);
+  } catch (e) {
+    busy = false;
+    setStatus("Error: " + e.message);
+  }
+}
+
+function sendTyped() { const t = $("typed").value; $("typed").value = ""; sendTurn(t); }
+
+// ============================================================================
+// 3. Voice OUT: play server MP3 (natural voice) or use the browser's voice
+// ============================================================================
+function speak(r) {
+  return new Promise((resolve) => {
+    const done = () => {
+      speaking = false; setStatus(sessionId ? "Your turn." : "");
+      resolve();
+      // Hands-free: start listening automatically after the agent finishes.
+      if (sessionId && $("handsfree").checked && !busy) startListening();
+    };
+    speaking = true;
+    setStatus("🔊 Aria is speaking… (click 🎙️ to interrupt)");
+    if (r.audio) {
+      currentAudio = new Audio("data:audio/mpeg;base64," + r.audio);
+      currentAudio.onended = done; currentAudio.onerror = done;
+      currentAudio.play().catch(done);
+    } else {
+      const u = new SpeechSynthesisUtterance(r.reply);
+      u.lang = SPEECH_CODE[r.language] || "en-IN";
+      u.rate = 1.05;
+      u.onend = done; u.onerror = done;
+      speechSynthesis.speak(u);
+    }
+  });
+}
+
+function stopAudio() {
+  if (currentAudio) { currentAudio.onended = null; currentAudio.pause(); currentAudio = null; }
+  speechSynthesis.cancel();
+  speaking = false;
+}
+
+// ============================================================================
+// 4. Voice IN: Chrome speech-to-text (Web Speech API)
+// ============================================================================
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognizer = null, listening = false;
+
+function startListening() {
+  if (!Recognition) { setStatus("Speech recognition needs Google Chrome. You can type instead."); return; }
+  if (listening || busy) return;
+  recognizer = new Recognition();
+  recognizer.lang = $("lang").value;      // en-IN, hi-IN, kn-IN, te-IN
+  recognizer.interimResults = true;        // show words while the customer is still speaking
+  let finalText = "";
+  recognizer.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    setStatus("🎙️ " + (finalText + interim));
+  };
+  recognizer.onend = () => {
+    listening = false; $("mic").classList.remove("listening");
+    if (finalText) sendTurn(finalText);
+    else if (sessionId && !busy) setStatus("Didn't catch that. Click 🎙️ to talk.");
+  };
+  recognizer.onerror = (e) => { if (e.error !== "no-speech" && e.error !== "aborted") setStatus("Mic error: " + e.error); };
+  recognizer.start();
+  listening = true; $("mic").classList.add("listening");
+  setStatus("🎙️ Listening…");
+}
+
+function stopListening() { if (recognizer && listening) recognizer.stop(); }
+
+function toggleMic() {
+  if (speaking) stopAudio();          // barge-in: customer interrupts the agent
+  listening ? stopListening() : startListening();
+}
+
+// ============================================================================
+// 5. Cockpit: per-turn details (from the reply) + live analysis (polling)
+// ============================================================================
+function showTurnDetails(r) {
+  // Latency bars
+  const L = r.latency, max = Math.max(L.total_ms, 1);
+  const row = (name, ms) => `<div class="lat-row"><span>${name}</span><div class="bar"><div style="width:${Math.min(100, ms / max * 100)}%"></div></div><span>${ms} ms</span></div>`;
+  $("latency").innerHTML = row("RAG", L.rag_ms) + row("LLM", L.llm_ms) + row("Voice", L.tts_ms || 0) + row("Total", L.total_ms);
+  $("provider").textContent = `LLM: ${r.provider} · voice: ${r.voice}`;
+
+  // Reasoning trace: RAG -> tools -> thought (newest turn on top)
+  let html = "";
+  for (const e of r.events) {
+    if (e.type === "rag") html += `<div class="step rag">📚 RAG: ${esc(e.detail)} (${e.ms} ms)${e.sources.length ? "<br>" + e.sources.map(s => `<span class="chip">${esc(s)}</span>`).join("") : "<br><span class='muted'>No matching facts → agent must not guess</span>"}</div>`;
+    if (e.type === "tool") html += `<div class="step tool">🛠️ Tool <code>${esc(e.detail)}</code>(${esc(JSON.stringify(e.args || {}))})<br><span class="muted">→ ${esc(JSON.stringify(e.result).slice(0, 220))}</span></div>`;
+  }
+  html += r.thoughts.filter(Boolean).map(t => `<div class="step">💭 ${esc(t)}</div>`).join("");
+  $("trace").innerHTML = `<div style="border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:6px">${html}</div>` + $("trace").innerHTML;
+
+  // Banners for booking / handoff
+  for (const e of r.events) {
+    if (e.type === "tool" && e.detail === "book_appointment" && e.result.booked) {
+      addBanner("booked", `📅 Demo booked: ${esc(e.result.slot)} IST · <a href="${esc(e.result.calendar_link)}" target="_blank">Add to Google Calendar</a>`);
+    }
+  }
+  if (r.handoff && !document.querySelector(".banner.handoff")) {
+    addBanner("handoff", "🙋 Handed over to a human sales consultant — lead flagged in CRM with full context.");
+  }
+}
+
+async function pollLive() {
+  if (!sessionId) return;
+  try {
+    const d = await api(`/api/call/${sessionId}/live`);
+    const a = d.analysis || {};
+    if (a.score === undefined) return;
+    $("score").textContent = a.score;
+    $("tier").textContent = a.tier; $("tier").className = "tier " + a.tier;
+    $("intent").textContent = a.intent ? "Intent: " + a.intent : "";
+    $("sentiment").textContent = a.sentiment || "–";
+    $("sentiment").style.color = a.sentiment === "positive" ? "var(--good)" : a.sentiment === "negative" ? "var(--bad)" : "var(--text)";
+    $("emotion").textContent = a.emotion ? "Emotion: " + a.emotion : "";
+    $("alert").textContent = a.alert || "";
+    drawSparkline(a.sentiment_history || []);
+    const bant = a.bant || {};
+    $("bant").innerHTML = ["need", "budget", "authority", "timeline"].map(k => {
+      const b = bant[k] || {}, st = b.status || "unknown";
+      return `<div class="bant-row"><span><b>${k[0].toUpperCase() + k.slice(1)}</b><br><span class="muted">${esc(b.value || "—")}</span></span><span class="st-${st}">${st === "clear" ? "✔ " : st === "partial" ? "◐ " : "○ "}${st}</span></div>`;
+    }).join("");
+    const list = (arr) => (arr || []).map(x => `<span class="chip">${esc(x)}</span>`).join("") || "<span class='muted'>—</span>";
+    $("insights").innerHTML = `<div><b>Buying signals:</b> ${list(a.buying_signals)}</div>
+      <div style="margin-top:6px"><b>Objections:</b> ${list(a.objections)}</div>
+      <div style="margin-top:6px"><b>Next best action:</b> ${esc(a.next_best_action || "—")}</div>`;
+  } catch (e) { /* call may have ended */ }
+}
+
+function drawSparkline(values) {
+  // Sentiment from -1 (bottom) to +1 (top), one point per customer turn.
+  if (values.length < 1) { $("spark").innerHTML = ""; return; }
+  const pts = values.map((v, i) => [values.length === 1 ? 100 : i * 200 / (values.length - 1), 20 - v * 18]);
+  $("spark").innerHTML = `<line x1="0" y1="20" x2="200" y2="20" stroke="#26314f" stroke-dasharray="3"/>
+    <polyline fill="none" stroke="#5b8cff" stroke-width="2" points="${pts.map(p => p.join(",")).join(" ")}"/>
+    ${pts.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="2.5" fill="#7c5cff"/>`).join("")}`;
+}
+
+function resetCockpit() {
+  $("score").textContent = "–"; $("tier").textContent = "cold"; $("tier").className = "tier cold";
+  ["intent", "emotion", "alert", "provider"].forEach(id => $(id).textContent = "");
+  $("sentiment").textContent = "–"; $("spark").innerHTML = "";
+  $("bant").innerHTML = "<p class='muted'>Updates after each customer turn.</p>";
+  $("latency").innerHTML = "<p class='muted'>No turns yet.</p>";
+  $("insights").textContent = "Buying signals, objections and the next best action appear here.";
+}
+
+// ============================================================================
+// 6. UI bits: messages, banners, status, summary popup
+// ============================================================================
+function addMessage(who, text, meta = "") {
+  const div = document.createElement("div");
+  div.className = "msg " + who;
+  div.innerHTML = esc(text) + (meta ? `<div class="meta">${esc(meta)}</div>` : "");
+  $("chat").appendChild(div);
+  $("chat").scrollTop = $("chat").scrollHeight;
+}
+function addBanner(type, html) {
+  const div = document.createElement("div");
+  div.className = "banner " + type; div.innerHTML = html;
+  $("banners").appendChild(div);
+}
+function setStatus(t) { $("status").textContent = t; }
+
+function showSummary(s, lead) {
+  const list = (arr) => (arr || []).length ? "<ul>" + arr.map(x => `<li>${esc(x)}</li>`).join("") + "</ul>" : "<p class='muted'>—</p>";
+  $("modalBody").innerHTML = `
+    <h3>Call summary</h3>
+    <p style="font-size:15px">${esc(s.summary)}</p>
+    <p><span class="tier ${esc(s.tier)}">${esc(s.tier)}</span> &nbsp;Score <b>${s.lead_score}</b> · Outcome <b>${esc(s.outcome)}</b> · Language <b>${esc(s.language)}</b> · ${s.turns} customer turns</p>
+    <p><b>Lead:</b> ${esc(lead.name || "unknown")} · ${esc(lead.phone)} ${lead.email ? "· " + esc(lead.email) : ""} ${lead.company ? "· " + esc(lead.company) : ""}</p>
+    <b>Needs</b>${list(s.customer_needs)}
+    <b>Objections</b>${list(s.objections)}
+    <b>Next steps for sales team</b>${list(s.next_steps)}
+    <p><b>Follow-up:</b> ${esc(s.follow_up || "—")}</p>
+    <p class="muted"><b>Agent feedback:</b> ${esc(s.agent_feedback || "—")}</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="ghost" onclick="$('modal').classList.add('hidden');showTab('dash')">Open dashboard</button>
+      <button class="primary" onclick="$('modal').classList.add('hidden')">Close</button>
+    </div>`;
+  $("modal").classList.remove("hidden");
+}
+
+// ============================================================================
+// 7. Insights dashboard
+// ============================================================================
+async function loadDashboard() {
+  const d = await api("/api/dashboard");
+  const s = d.stats;
+  const stat = (n, label) => `<div class="card stat"><div class="n">${n}</div><div class="muted">${label}</div></div>`;
+  $("stats").innerHTML = stat(s.calls, "Calls handled") + stat(s.leads, "Leads in CRM") + stat(s.hot_leads, "Hot leads (≥70)") +
+    stat(s.demos_booked, "Demos booked") + stat(s.handoffs, "Human handoffs") + stat(s.avg_score, "Avg lead score") +
+    stat(s.avg_turn_ms ? s.avg_turn_ms + " ms" : "–", "Avg response time");
+
+  $("leads").innerHTML = d.leads.length ? `<table><tr><th>Lead</th><th>Score</th><th>Status</th><th>Need / Budget / Timeline</th><th>Lang</th></tr>` +
+    d.leads.map(l => `<tr><td><b>${esc(l.name || "Unknown")}</b><br><span class="muted">${esc(l.phone)}${l.company ? " · " + esc(l.company) : ""}</span></td>
+      <td><b>${l.score ?? 0}</b></td><td><span class="chip">${esc(l.status)}</span></td>
+      <td class="muted">${esc(l.need || "—")}<br>${esc(l.budget || "—")} · ${esc(l.timeline || "—")}</td><td>${esc(l.language || "")}</td></tr>`).join("") + "</table>"
+    : "<p class='muted'>No leads yet. Make a call first.</p>";
+
+  $("appts").innerHTML = d.appointments.length ? d.appointments.map(a =>
+    `<div class="summary-card"><b>${esc(a.start)} IST</b> · ${esc(a.name || a.phone)}<br>
+     <span class="muted">${esc(a.topic)}</span> · <a href="${esc(a.link)}" target="_blank">Google Calendar</a></div>`).join("")
+    : "<p class='muted'>No demos booked yet.</p>";
+
+  $("calls").innerHTML = d.calls.length ? d.calls.map(c => {
+    const s = c.summary || {};
+    return `<div class="summary-card">
+      <div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(c.name || c.phone)}</b><span class="muted">${esc(c.created_at)}</span></div>
+      <p style="margin:6px 0">${esc(s.summary)}</p>
+      <span class="tier ${esc(s.tier || "cold")}">${esc(s.tier || "cold")}</span>
+      <span class="chip">score ${s.lead_score ?? 0}</span><span class="chip">${esc(s.outcome)}</span><span class="chip">${esc(s.language)}</span>
+      ${(s.next_steps || []).length ? `<div class="muted" style="margin-top:6px">Next: ${s.next_steps.map(esc).join(" · ")}</div>` : ""}
+      <details style="margin-top:6px"><summary class="muted">Transcript</summary>
+        ${c.transcript.map(t => `<div><b>${t.who === "agent" ? "Aria" : "Customer"}:</b> ${esc(t.text)}</div>`).join("")}</details>
+    </div>`;
+  }).join("") : "<p class='muted'>No calls yet.</p>";
+}
+
+// ============================================================================
+// Startup: show whether keys / RAG are ready
+// ============================================================================
+api("/api/health").then(h => {
+  const keys = [h.gemini_key && "Gemini", h.groq_key && "Groq"].filter(Boolean);
+  $("health").innerHTML = `LLM: <b>${keys.length ? keys.join(" + ") : "⚠ no API keys"}</b> · RAG: ${h.rag_mode} (${h.rag_chunks} chunks)`;
+}).catch(() => $("health").textContent = "server not reachable");
+</script>
+</body>
+</html>
