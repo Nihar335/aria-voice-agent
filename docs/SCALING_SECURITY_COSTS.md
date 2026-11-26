@@ -20,7 +20,7 @@ Formula: `concurrent = calls_per_hour × call_minutes / 60`. **Scenario A runs o
 | Sessions in a Python dict (one server only) | **Redis** with a time limit → servers become **stateless**, any pod can serve any turn, horizontal autoscaling |
 | SQLite (one file, one writer) | **PostgreSQL** (managed, e.g. AWS RDS / Cloud SQL) with read replicas; `tenant_id` on every row for multi-client SaaS |
 | NumPy vector search in memory | **pgvector** (or Qdrant) with one namespace per client; HNSW index keeps search ~10 ms at millions of chunks |
-| Browser STT + HTTP per turn | **Telephony media streams** (Exotel / Twilio) over WebSocket → **streaming STT** with voice-activity detection → **streaming TTS** |
+| Browser mic + HTTP per turn (server STT on whole utterances) | **Telephony media streams** (Exotel / Twilio) over WebSocket → **streaming STT** with voice-activity detection → **streaming TTS** |
 | Analysis as a FastAPI background task | **Queue** (Redis Streams / SQS) + **worker pool** that scales separately from live calls |
 | Free-tier LLM keys | **Vertex AI / paid tiers with provisioned throughput**, several projects/keys in a pool, automatic failover to a second provider (already built in `llm.py`) |
 | Polling for the cockpit | **WebSockets / Server-Sent Events** |
@@ -47,7 +47,7 @@ Formula: `concurrent = calls_per_hour × call_minutes / 60`. **Scenario A runs o
 | Input validation | Pydantic: types, 600-char limit; phone normalised | + rate limiting per caller / IP, WAF |
 | Database | Parameterised SQL (`?`), allow-listed columns | + encryption at rest, least-privilege DB users, backups |
 | Web page | All text HTML-escaped (`esc()`) → no XSS | + CSP headers |
-| Dashboard + admin access | The admin view of the single page, behind one `ADMIN_PASSWORD`: random 8-hour tokens, constant-time password check, 10 failed logins per 5 min limit; every `/api/admin/...` route (dashboard, uploads, search) requires the token; the customer call page has no admin access | SSO / OAuth login, per-user roles (agent, supervisor, admin), tokens in Redis, audit log |
+| Dashboard + admin access | Google sign-in (OAuth + PKCE); roles admin / manager / sales_rep / viewer / customer checked on every `/api/admin/...` route and every tool; Users tab to manage roles; audit log. Break-glass `ADMIN_PASSWORD` (constant-time check, 10 failed logins per 5 min limit; leave empty in production). Random 8-hour tokens. Customer calls run in customer mode and never receive internal fields | Company SSO (Google Workspace / Azure AD), tokens in Redis, per-tenant roles |
 | Confidential documents | Two collections: **public** (`knowledge_base/`, the agent reads it) and **internal** (`knowledge_internal/`, git-ignored, admin search only). The agent never loads internal docs into its prompt, so it cannot leak them. Uploads default to internal; neither folder is served as static files | + per-tenant storage buckets, encryption at rest, document-level permissions |
 | File uploads | `.md` / `.txt` / `.pdf` only, size limit `MAX_UPLOAD_MB` (default 50 MB), file names sanitised (no `../` path tricks), PDFs stored as extracted text | + malware scan, OCR for scanned PDFs, upload audit trail |
 | Prompt injection | Agent can only use 5 tools; every tool validates arguments (e.g. slot must be truly free); LLM never touches the DB; RAG reads only approved company docs | + output filters, red-team test set, per-tenant tool permissions |
@@ -107,8 +107,8 @@ Per 4-minute call, about 37k LLM input tokens and 3.4k output tokens (agent + pe
 - **Fit with Fortivex's portfolio:** sold as an add-on to **Fortivex CRM** (adapter already designed), and as a vertical product for **Medivex AI** (clinic appointment booking) and **Empowers Academy** (course enquiries and admissions).
 
 ## 7. Honest MVP limitations
-- One shared admin password (no per-user accounts or roles); admin tokens and call sessions in memory; one tenant; SQLite.
-- Browser STT works in Chrome/Edge only; edge-tts is an unofficial free service (no SLA).
+- Login tokens and call sessions in memory (lost on restart); one tenant; SQLite.
+- Speech-to-text and Gemini TTS run on free-tier quotas (Gemini TTS falls back to edge-tts when the quota runs out); edge-tts is an unofficial free service (no SLA); Chrome recognition is only the last backup.
 - Free-tier LLM rate limits → fine for a demo, not for production traffic.
 - Turn latency ~2-4 s with the natural voice (no streaming yet).
 All of these have a planned fix in sections 2-4.

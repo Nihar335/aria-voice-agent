@@ -400,15 +400,11 @@
       <input id="phone" type="tel" inputmode="tel" placeholder="Your phone number" autocomplete="tel" maxlength="20"
              onkeydown="if(event.key==='Enter'){startCall()}">
       <select id="lang" title="The language you will speak (mic + Aria's replies)">
-        <optgroup label="English & Hindi">
-          <option value="en">English</option>
-          <option value="hi">हिन्दी Hindi</option>
-          <option value="hinglish">Hinglish (Hindi in English letters)</option>
-        </optgroup>
-        <optgroup label="South Indian">
-          <option value="kn">ಕನ್ನಡ Kannada</option>
-          <option value="te">తెలుగు Telugu</option>
-        </optgroup>
+        <option value="en">English</option>
+        <option value="hi">हिन्दी Hindi</option>
+        <option value="hinglish">Hinglish (Hindi in English letters)</option>
+        <option value="kn">ಕನ್ನಡ Kannada</option>
+        <option value="te">తెలుగు Telugu</option>
       </select>
       <select id="chatView" title="How messages appear in the chat" onchange="setChatView(this.value)">
         <option value="original">Chat: as spoken</option>

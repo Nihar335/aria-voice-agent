@@ -42,20 +42,21 @@ flowchart TB
 ```mermaid
 flowchart LR
     subgraph Browser["Browser - frontend/index.html"]
-        MIC["🎙️ Chrome Speech-to-Text<br/>en-IN · hi-IN · kn-IN · te-IN"]
-        UI["Call screen +<br/>Live cockpit<br/>(index.html)"]
-        ADM["Admin view (index.html &rarr; Admin)<br/>login · sales dashboard ·<br/>knowledge upload + search"]
+        MIC["🎙️ Mic recording - call-core.js<br/>speech start/end detection<br/>16 kHz WAV per utterance"]
+        UI["Call screen + live chat summary (customer)<br/>+ live cockpit (admin)"]
+        ADM["Admin view (index.html &rarr; Admin)<br/>Google sign-in · sales dashboard ·<br/>knowledge · quality · users"]
         SPK["🔊 Audio player<br/>(browser voice fallback)"]
     end
 
     subgraph Server["FastAPI server - main.py"]
-        API["REST API<br/>/api/call/start · turn · live · end<br/>/api/health"]
-        ADMIN["Admin API - admin.py<br/>password login → token<br/>/api/admin/dashboard · documents · search"]
+        API["REST API<br/>/api/call/start · stt · turn · live · recap · end<br/>/api/health"]
+        ADMIN["Admin API - admin.py + layers/rbac.py<br/>Google sign-in / break-glass password → token<br/>role checked on every route"]
         AGENT["Agent brain - agent.py<br/>think → act → observe loop<br/>(max 3 tool steps)"]
         RAG["RAG - rag.py<br/>section chunks + Gemini embeddings<br/>TF-IDF offline fallback"]
         TOOLS["Tools - tools.py<br/>save_lead_info · check_availability<br/>book_appointment · handoff_to_human<br/>search_knowledge"]
         ANALYSIS["Analysis - analysis.py<br/>language · sentiment · BANT score<br/>call summary (background)"]
-        TTS["TTS - tts.py<br/>edge-tts neural voices"]
+        STT["STT - stt.py<br/>Groq Whisper (en/hi)<br/>Gemini (te/kn/Hinglish)"]
+        TTS["TTS - tts.py<br/>Gemini TTS (Telugu)<br/>edge-tts neural voices"]
         LLM["LLM gateway - llm.py<br/>5-model fallback chain<br/>fail-fast on rate limits<br/>JSON mode + latency"]
         CRM["CRM adapter - crm.py<br/>SQLiteCRM (today)<br/>FortivexCRMAdapter (plug-in)"]
     end
@@ -63,12 +64,15 @@ flowchart LR
     KB[("knowledge_base/ (public)<br/>services · pricing · FAQ · objections")]
     KBI[("knowledge_internal/ (confidential)<br/>admin-only, never sent to the agent")]
     DB[("SQLite<br/>leads · calls · appointments")]
-    GEM["Google Gemini API<br/>chat backup + embeddings"]
-    GROQ["Groq API (primary)<br/>Qwen 3.8 · GPT-OSS 120B/20B"]
+    GEM["Google Gemini API<br/>chat backup · embeddings · STT · TTS"]
+    GROQ["Groq API (primary)<br/>Qwen 3.8 · GPT-OSS 120B/20B · Whisper"]
     MSV["Microsoft neural voices"]
     GCAL["Google Calendar<br/>pre-filled event link"]
 
-    MIC -->|text| API
+    MIC -->|WAV audio| API
+    API --> STT
+    STT --> GROQ
+    STT -.->|fallback| GEM
     API --> AGENT
     AGENT --> RAG
     RAG --> KB
@@ -82,6 +86,7 @@ flowchart LR
     RAG -.->|embeddings| GEM
     API --> TTS
     TTS --> MSV
+    TTS -.->|Telugu| GEM
     API -->|reply + audio + sources + latency| SPK
     API --> ANALYSIS
     ANALYSIS --> CRM
@@ -114,11 +119,12 @@ sequenceDiagram
     participant R as RAG (rag.py)
     participant L as LLM (Gemini / Groq)
     participant T as Tools + CRM
-    participant V as TTS (edge-tts)
+    participant V as TTS (Gemini TTS / edge-tts)
     participant N as Analysis (background)
 
     C->>B: "Book a demo tomorrow at 3"
-    B->>B: Chrome speech-to-text (en-IN)
+    B->>S: POST /api/call/stt (WAV audio)
+    S-->>B: text (Groq Whisper; Gemini as backup)
     B->>S: POST /api/call/turn {session_id, text}
     S->>A: handle_turn()
     A->>R: search(text)
@@ -194,11 +200,11 @@ flowchart LR
 What changes from MVP to production, and what does **not**:
 | Layer | MVP | Production | Code impact |
 |---|---|---|---|
-| Audio in/out | Browser STT, edge-tts, HTTP per turn | Telephony WebSocket, streaming STT/TTS | new gateway service; agent unchanged |
+| Audio in/out | Browser mic, server STT per utterance, Gemini TTS / edge-tts, HTTP per turn | Telephony WebSocket, streaming STT/TTS | new gateway service; agent unchanged |
 | Sessions | Python dict | Redis | `SESSIONS` → Redis client |
 | CRM | SQLite | PostgreSQL / Fortivex CRM API | one adapter class in `crm.py` |
 | RAG index | NumPy in memory, public + internal collections | pgvector, one namespace per client and per collection | inside `rag.search()` only |
-| Admin auth | One password, in-memory tokens | SSO + roles, tokens in Redis | `require_admin()` in `admin.py` |
+| Admin auth | Google sign-in + roles (RBAC), in-memory tokens | Company SSO, tokens in Redis | `_sessions` in `layers/rbac.py` |
 | LLM | Free-tier keys | Vertex AI / paid tiers, quota pools | config only |
 | Analysis | FastAPI background task | queue + worker pool | move function call to a worker |
 
