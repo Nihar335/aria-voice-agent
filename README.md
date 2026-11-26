@@ -4,6 +4,12 @@ A voice sales agent that talks to customers in **English, Hindi, Hinglish, Kanna
 
 🗺️ **[System architecture page](docs/architecture.html)** (diagram, workflow, business case, scaling, security, costs, live-coding guide; open in a browser) · 📄 **[1-page report](REPORT.md)** · 🏗️ **[Architecture + end-to-end workflow](docs/ARCHITECTURE.md)** · 📈 **[Scaling, security, costs](docs/SCALING_SECURITY_COSTS.md)**
 
+## System architecture
+
+[![Aria system architecture: browser clients, FastAPI backend with the agent pipeline, cloud LLM/speech APIs and local storage](docs/architecture.svg)](docs/architecture.svg)
+
+Customer calls (teal) and staff/admin traffic (purple) reach the FastAPI backend, which runs every turn through the agent pipeline, calls the cloud LLM and speech APIs (orange, keys from `.env`) and writes to local storage (grey, dashed). Click the diagram to open it full size; more diagrams are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Built in 7 layers (how companies build their own AI)
 One API call is not a product. Every customer turn goes through these layers, in order ([layers/pipeline.py](layers/pipeline.py)):
 
