@@ -1,0 +1,718 @@
+<title>Aria System Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>
+/* Layout: a technical brief. Wide diagram on top, then six numbered sections that follow the assignment's own list. */
+:root {
+  --bg: #f3f6f9;
+  --surface: #ffffff;
+  --sunk: #e9eef4;
+  --ink: #14202f;
+  --muted: #566476;
+  --line: #c9d2dd;
+  --call: #0b7a83;      /* customer call path */
+  --call-soft: #dcf0f1;
+  --staff: #6a4fb8;     /* staff / admin path */
+  --staff-soft: #ece7fa;
+  --store: #7a8595;     /* storage writes */
+  --warn: #a86400;
+  --warn-soft: #f8ecd9;
+  --ok: #2f7d47;
+  --f-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e141c; --surface: #161f2b; --sunk: #1c2734; --ink: #e5ebf2; --muted: #98a6b8; --line: #2e3a4a;
+    --call: #4dbcc5; --call-soft: #12333a; --staff: #a68ff0; --staff-soft: #2a2343; --store: #8e9aab;
+    --warn: #e2a64a; --warn-soft: #3a2c16; --ok: #6cc28a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e141c; --surface: #161f2b; --sunk: #1c2734; --ink: #e5ebf2; --muted: #98a6b8; --line: #2e3a4a;
+  --call: #4dbcc5; --call-soft: #12333a; --staff: #a68ff0; --staff-soft: #2a2343; --store: #8e9aab;
+  --warn: #e2a64a; --warn-soft: #3a2c16; --ok: #6cc28a; color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 40px 72px; display: grid; gap: 56px; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2rem, 4.5vw, 3rem); line-height: 1.1; }
+h2 { font-size: 1.6rem; line-height: 1.2; }
+h3 { font-size: 1.05rem; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: var(--f-mono); font-size: 0.86em; }
+code { background: var(--sunk); padding: 1px 5px; border-radius: 4px; }
+a { color: var(--call); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--call); outline-offset: 2px; }
+
+header.top { display: grid; gap: 18px; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 1.08rem; color: var(--muted); }
+.facts { display: flex; flex-wrap: wrap; gap: 10px 28px; padding-top: 6px; }
+.facts div { display: grid; }
+.facts b { font-family: var(--f-display); font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.facts span { font-size: 12.5px; color: var(--muted); }
+nav.toc { display: flex; flex-wrap: wrap; gap: 8px; }
+nav.toc a { text-decoration: none; color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 13px; background: var(--surface); }
+nav.toc a:hover { border-color: var(--call); color: var(--call); }
+
+section { display: grid; gap: 20px; scroll-margin-top: 16px; }
+.sec-head { display: grid; gap: 6px; }
+.sec-head .num { font-family: var(--f-mono); font-size: 12px; color: var(--call); letter-spacing: 0.06em; }
+
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+.diagram svg { display: block; min-width: 1120px; width: 100%; height: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend i { display: inline-block; width: 26px; height: 0; border-top: 2px solid; }
+
+/* SVG styling */
+.bx { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.bx-call { fill: var(--call-soft); stroke: var(--call); stroke-width: 1.2; }
+.bx-staff { fill: var(--staff-soft); stroke: var(--staff); stroke-width: 1.2; }
+.bx-sunk { fill: var(--sunk); stroke: var(--line); stroke-width: 1.2; }
+.frame { fill: none; stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 5 5; }
+.t-h { font-family: var(--f-display); font-weight: 600; font-size: 13.5px; fill: var(--ink); }
+.t-m { font-family: var(--f-mono); font-size: 10.5px; fill: var(--call); }
+.t-ms { font-family: var(--f-mono); font-size: 10.5px; fill: var(--staff); }
+.t-b { font-family: var(--f-body); font-size: 11.5px; fill: var(--muted); }
+.t-lab { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.08em; fill: var(--muted); }
+.t-step { font-family: var(--f-body); font-weight: 600; font-size: 12px; fill: var(--ink); }
+.t-n { font-family: var(--f-mono); font-size: 10px; font-weight: 500; fill: var(--surface); }
+.dot { fill: var(--call); }
+.w-call { stroke: var(--call); stroke-width: 1.8; fill: none; }
+.w-staff { stroke: var(--staff); stroke-width: 1.8; fill: none; }
+.w-store { stroke: var(--store); stroke-width: 1.4; fill: none; stroke-dasharray: 4 4; }
+.w-net { stroke: var(--warn); stroke-width: 2.2; fill: none; }
+.w-net-thin { stroke: var(--warn); stroke-width: 1.6; fill: none; }
+.mk-call { fill: var(--call); } .mk-staff { fill: var(--staff); } .mk-store { fill: var(--store); } .mk-net { fill: var(--warn); }
+.rowline { stroke: var(--line); stroke-width: 1; }
+
+/* Cards and grids */
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 860px) { .grid3, .grid2 { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.card ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.card .tag { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* Workflow */
+ol.flow { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; counter-reset: s; }
+ol.flow li { display: grid; grid-template-columns: 40px minmax(0, 1fr) minmax(0, 260px); gap: 14px; padding: 14px 0; border-top: 1px solid var(--line); counter-increment: s; align-items: start; }
+ol.flow li::before { content: counter(s); font-family: var(--f-mono); font-size: 12px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--call); color: var(--surface); }
+ol.flow .say { font-style: italic; color: var(--muted); }
+ol.flow .where { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+@media (max-width: 700px) { ol.flow li { grid-template-columns: 32px minmax(0, 1fr); } ol.flow .where { grid-column: 2; } }
+.outcome { background: var(--call-soft); border: 1px solid var(--call); border-radius: 10px; padding: 14px 18px; }
+
+/* Tables */
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--f-mono); font-size: 11.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); background: var(--sunk); }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+tr.total td { font-weight: 600; }
+
+/* Production topology */
+.topo { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; position: relative; }
+.tier { display: grid; gap: 8px; align-content: start; position: relative; }
+.tier + .tier::before { content: "→"; position: absolute; left: -22px; top: 26px; color: var(--muted); font-size: 18px; }
+.tier h3 { font-size: 0.82rem; font-family: var(--f-mono); font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.chip { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 13.5px; }
+.chip small { display: block; color: var(--muted); font-size: 12px; }
+@media (max-width: 860px) { .topo { grid-template-columns: minmax(0, 1fr); } .tier + .tier::before { content: "↓"; left: 0; top: -24px; } }
+
+/* Cost bar */
+.costbar { display: flex; height: 38px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.costbar div { display: grid; place-items: center; font-size: 12px; font-weight: 600; color: #fff; min-width: 0; white-space: nowrap; overflow: hidden; }
+.costkey { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); }
+.costkey span { display: inline-flex; align-items: center; gap: 6px; }
+.costkey i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* CI pipeline */
+.pipe { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pipe span { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font-size: 13px; }
+.pipe b { color: var(--muted); font-weight: 400; }
+
+.note { font-size: 13px; color: var(--muted); }
+footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 18px; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <div class="eyebrow">Fortivex AI · Assignment submission · Nihar</div>
+  <h1>Aria: the system architecture of an AI sales voice agent</h1>
+  <p class="lede">Aria answers sales calls for Indian businesses in English, Hindi, Hinglish, Kannada and Telugu. It answers only from approved company documents, qualifies the lead, books a demo into the CRM and hands a summary to the sales team. This page covers the six points the assignment asks for, in the same order.</p>
+  <div class="facts">
+    <div><b>5</b><span>languages</span></div>
+    <div><b>8</b><span>layers per customer turn</span></div>
+    <div><b>49 / 49</b><span>offline unit tests pass</span></div>
+    <div><b>22 / 22</b><span>golden conversations pass</span></div>
+    <div><b>≈ ₹10</b><span>cost per 4-minute call</span></div>
+    <div><b>~55%</b><span>gross margin (sample plan)</span></div>
+  </div>
+  <nav class="toc" aria-label="Sections">
+    <a href="#architecture">1 · Architecture</a>
+    <a href="#workflow">2 · End-to-end workflow</a>
+    <a href="#business">3 · Problem, build, business case</a>
+    <a href="#scale">4 · Scaling to 1,00,000</a>
+    <a href="#security">5 · Security, infra, deployment, costs</a>
+    <a href="#live">6 · Live coding readiness</a>
+  </nav>
+</header>
+
+<!-- ============================================================ 1 -->
+<section id="architecture">
+  <div class="sec-head">
+    <div class="num">1 · SYSTEM ARCHITECTURE</div>
+    <h2>What runs today, and how the parts talk</h2>
+    <p>One Python backend (FastAPI) serves the web page and the API. Each customer turn runs through an eight-layer pipeline. Every outside dependency sits behind one module, so it can be swapped, and every one has a fallback, so a live call never goes silent.</p>
+  </div>
+
+  <div class="diagram" role="img" aria-label="Aria system architecture: clients, API routes, agent core, cloud APIs and storage">
+  <svg viewBox="0 0 1300 935" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="a-call" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="mk-call"/></marker>
+      <marker id="a-staff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="mk-staff"/></marker>
+      <marker id="a-store" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="mk-store"/></marker>
+      <marker id="a-net" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="mk-net"/></marker>
+    </defs>
+
+    <!-- column labels -->
+    <text x="20" y="74" class="t-lab">CLIENTS · BROWSER</text>
+    <rect x="240" y="50" width="760" height="705" rx="14" class="frame"/>
+    <text x="258" y="74" class="t-lab">PYTHON BACKEND · FastAPI on uvicorn · main.py</text>
+    <text x="1030" y="74" class="t-lab">CLOUD APIs</text>
+    <text x="20" y="845" class="t-lab">STORAGE</text>
+    <text x="20" y="862" class="t-b">local disk · data/</text>
+
+    <!-- ===== Clients ===== -->
+    <rect x="20" y="100" width="195" height="160" rx="8" class="bx-call"/>
+    <text x="34" y="124" class="t-h">Customer page</text>
+    <text x="34" y="141" class="t-m">index.html#customer</text>
+    <text x="34" y="164" class="t-b">call-core.js: mic → 16 kHz WAV,</text>
+    <text x="34" y="180" class="t-b">barge-in, language menu</text>
+    <text x="34" y="200" class="t-b">customer.js: live chat summary</text>
+    <text x="34" y="220" class="t-b">plays the reply audio;</text>
+    <text x="34" y="236" class="t-b">browser voice if TTS fails</text>
+
+    <rect x="20" y="280" width="195" height="220" rx="8" class="bx-staff"/>
+    <text x="34" y="304" class="t-h">Admin page</text>
+    <text x="34" y="321" class="t-ms">index.html#admin</text>
+    <text x="34" y="344" class="t-b">Google sign-in or password</text>
+    <text x="34" y="366" class="t-b">cockpit.js: live lead score,</text>
+    <text x="34" y="382" class="t-b">BANT, agent reasoning, latency</text>
+    <text x="34" y="398" class="t-b">(polls /api/call/{id}/live)</text>
+    <text x="34" y="420" class="t-b">admin.js: knowledge upload,</text>
+    <text x="34" y="436" class="t-b">sales dashboard, quality,</text>
+    <text x="34" y="452" class="t-b">traces, audit log, users</text>
+
+    <rect x="20" y="520" width="195" height="70" rx="8" class="bx-call"/>
+    <text x="34" y="544" class="t-h">My calls page</text>
+    <text x="34" y="561" class="t-m">my-calls.html#&lt;secret&gt;</text>
+    <text x="34" y="578" class="t-b">the customer's own calls only</text>
+
+    <rect x="20" y="610" width="195" height="110" rx="8" class="bx-staff"/>
+    <text x="34" y="634" class="t-h">MCP clients</text>
+    <text x="34" y="651" class="t-ms">Claude Desktop, CRM agents</text>
+    <text x="34" y="674" class="t-b">"who are my hot leads?"</text>
+    <text x="34" y="690" class="t-b">stdio transport,</text>
+    <text x="34" y="706" class="t-b">role set by MCP_ROLE</text>
+
+    <!-- ===== API column ===== -->
+    <rect x="258" y="100" width="182" height="160" rx="8" class="bx"/>
+    <text x="272" y="124" class="t-h">Call API</text>
+    <text x="272" y="146" class="t-m">POST /api/call/start</text>
+    <text x="272" y="162" class="t-m">POST /api/call/stt</text>
+    <text x="272" y="178" class="t-m">POST /api/call/turn</text>
+    <text x="272" y="194" class="t-m">GET  /api/call/{id}/live</text>
+    <text x="272" y="210" class="t-m">POST /api/call/end</text>
+    <text x="272" y="234" class="t-b">runs as the customer role:</text>
+    <text x="272" y="250" class="t-b">5 call tools, own lead only</text>
+
+    <rect x="258" y="280" width="182" height="100" rx="8" class="bx"/>
+    <text x="272" y="304" class="t-h">Staff sign-in</text>
+    <text x="272" y="321" class="t-ms">layers/rbac.py</text>
+    <text x="272" y="342" class="t-b">Google OAuth 2.0 + PKCE</text>
+    <text x="272" y="358" class="t-b">break-glass password</text>
+    <text x="272" y="374" class="t-b">→ bearer token + role</text>
+
+    <rect x="258" y="395" width="182" height="105" rx="8" class="bx"/>
+    <text x="272" y="419" class="t-h">Admin API</text>
+    <text x="272" y="436" class="t-ms">admin.py · /api/admin/*</text>
+    <text x="272" y="457" class="t-b">documents, search, quality,</text>
+    <text x="272" y="473" class="t-b">traces, audit, users</text>
+    <text x="272" y="489" class="t-b">require(permission) per route</text>
+
+    <rect x="258" y="520" width="182" height="70" rx="8" class="bx"/>
+    <text x="272" y="544" class="t-h">Portal API</text>
+    <text x="272" y="561" class="t-m">portal.py · /api/portal</text>
+    <text x="272" y="578" class="t-b">secret link → own data only</text>
+
+    <rect x="258" y="610" width="182" height="110" rx="8" class="bx"/>
+    <text x="272" y="634" class="t-h">MCP server</text>
+    <text x="272" y="651" class="t-ms">mcp_server.py</text>
+    <text x="272" y="674" class="t-b">separate stdio process</text>
+    <text x="272" y="690" class="t-b">same tools.py registry</text>
+    <text x="272" y="706" class="t-b">every call in the audit log</text>
+
+    <!-- ===== Agent + pipeline ===== -->
+    <rect x="465" y="100" width="300" height="440" rx="8" class="bx"/>
+    <text x="481" y="124" class="t-h">Agent</text>
+    <text x="530" y="124" class="t-m">agent.py</text>
+    <text x="481" y="143" class="t-b">call sessions and caller memory</text>
+    <line x1="481" y1="158" x2="749" y2="158" class="rowline"/>
+    <text x="481" y="178" class="t-lab">EVERY TURN · layers/pipeline.py</text>
+
+    <g>
+      <circle cx="492" cy="207" r="10" class="dot"/><text x="492" y="210.5" text-anchor="middle" class="t-n">1</text>
+      <text x="510" y="204" class="t-step">Input guardrails</text>
+      <text x="510" y="219" class="t-b">mask card, Aadhaar, PAN, OTP · injection</text>
+      <circle cx="492" cy="249" r="10" class="dot"/><text x="492" y="252.5" text-anchor="middle" class="t-n">2</text>
+      <text x="510" y="246" class="t-step">RAG retrieval</text>
+      <text x="510" y="261" class="t-b">top facts + sources, no-guess threshold</text>
+      <circle cx="492" cy="291" r="10" class="dot"/><text x="492" y="294.5" text-anchor="middle" class="t-n">3</text>
+      <text x="510" y="288" class="t-step">Router</text>
+      <text x="510" y="303" class="t-b">FAQ → fast model · booking → strong</text>
+      <circle cx="492" cy="333" r="10" class="dot"/><text x="492" y="336.5" text-anchor="middle" class="t-n">4</text>
+      <text x="510" y="330" class="t-step">Answer cache</text>
+      <text x="510" y="345" class="t-b">repeated FAQ → reply with 0 LLM calls</text>
+      <circle cx="492" cy="375" r="10" class="dot"/><text x="492" y="378.5" text-anchor="middle" class="t-n">5</text>
+      <text x="510" y="372" class="t-step">System prompt</text>
+      <text x="510" y="387" class="t-b">versioned file, hash in every trace</text>
+      <circle cx="492" cy="417" r="10" class="dot"/><text x="492" y="420.5" text-anchor="middle" class="t-n">6</text>
+      <text x="510" y="414" class="t-step">LLM ⇄ tools</text>
+      <text x="510" y="429" class="t-b">think → act → observe, max 3 tool steps</text>
+      <circle cx="492" cy="459" r="10" class="dot"/><text x="492" y="462.5" text-anchor="middle" class="t-n">7</text>
+      <text x="510" y="456" class="t-step">Output guardrails</text>
+      <text x="510" y="471" class="t-b">invented price or fake booking → redo</text>
+      <circle cx="492" cy="501" r="10" class="dot"/><text x="492" y="504.5" text-anchor="middle" class="t-n">8</text>
+      <text x="510" y="498" class="t-step">Trace</text>
+      <text x="510" y="513" class="t-b">time, tokens, cost → observability.db</text>
+    </g>
+
+    <!-- Analysis -->
+    <rect x="465" y="560" width="300" height="175" rx="8" class="bx"/>
+    <text x="481" y="584" class="t-h">Call analysis</text>
+    <text x="590" y="584" class="t-m">analysis.py</text>
+    <text x="481" y="606" class="t-b">background task, after the reply is sent</text>
+    <text x="481" y="628" class="t-b">language detection · sentiment · upset alert</text>
+    <text x="481" y="646" class="t-b">BANT lead score 0-100 (a formula, not a guess)</text>
+    <text x="481" y="664" class="t-b">end-of-call summary, objections, next steps</text>
+    <text x="481" y="682" class="t-b">customer-safe summary for the portal</text>
+    <text x="481" y="706" class="t-b">writes the lead record in crm.db</text>
+
+    <!-- ===== Right core column ===== -->
+    <rect x="785" y="100" width="195" height="75" rx="8" class="bx"/>
+    <text x="799" y="123" class="t-h">Speech-to-text</text>
+    <text x="910" y="123" class="t-m">stt.py</text>
+    <text x="799" y="143" class="t-b">Whisper for English, Hindi</text>
+    <text x="799" y="159" class="t-b">Gemini for Telugu, Kannada</text>
+
+    <rect x="785" y="185" width="195" height="75" rx="8" class="bx"/>
+    <text x="799" y="208" class="t-h">Text-to-speech</text>
+    <text x="910" y="208" class="t-m">tts.py</text>
+    <text x="799" y="228" class="t-b">Gemini natural voice (Telugu)</text>
+    <text x="799" y="244" class="t-b">edge-tts for the others</text>
+
+    <rect x="785" y="270" width="195" height="95" rx="8" class="bx"/>
+    <text x="799" y="293" class="t-h">Knowledge search</text>
+    <text x="928" y="293" class="t-m">rag.py</text>
+    <text x="799" y="313" class="t-b">Gemini embeddings, cosine</text>
+    <text x="799" y="329" class="t-b">TF-IDF keyword fallback</text>
+    <text x="799" y="345" class="t-b">public + internal indexes</text>
+
+    <rect x="785" y="375" width="195" height="60" rx="8" class="bx"/>
+    <text x="799" y="398" class="t-h">Answer cache</text>
+    <text x="799" y="416" class="t-m">layers/cache.py · memory</text>
+
+    <rect x="785" y="445" width="195" height="110" rx="8" class="bx"/>
+    <text x="799" y="468" class="t-h">LLM gateway</text>
+    <text x="900" y="468" class="t-m">llm.py</text>
+    <text x="799" y="490" class="t-b">fast and strong model tiers</text>
+    <text x="799" y="506" class="t-b">Groq ⇄ Gemini fallback chain</text>
+    <text x="799" y="522" class="t-b">JSON mode, skips a model</text>
+    <text x="799" y="538" class="t-b">on rate limit</text>
+
+    <rect x="785" y="575" width="195" height="160" rx="8" class="bx"/>
+    <text x="799" y="598" class="t-h">Tool registry</text>
+    <text x="900" y="598" class="t-m">tools.py</text>
+    <text x="799" y="618" class="t-b">schema check + RBAC check</text>
+    <text x="799" y="640" class="t-b">Customer (5): search, save lead,</text>
+    <text x="799" y="656" class="t-b">check slots, book demo, handoff</text>
+    <text x="799" y="678" class="t-b">Staff (+3): get lead, hot leads,</text>
+    <text x="799" y="694" class="t-b">internal search</text>
+    <text x="799" y="716" class="t-b">booking → Google Calendar link</text>
+
+    <!-- ===== Cloud APIs ===== -->
+    <rect x="1030" y="100" width="250" height="120" rx="8" class="bx-sunk"/>
+    <text x="1044" y="124" class="t-h">Groq</text>
+    <text x="1044" y="146" class="t-b">LLM: Qwen 3.8, GPT-OSS 120B / 20B</text>
+    <text x="1044" y="162" class="t-b">STT: Whisper large-v3</text>
+    <text x="1044" y="184" class="t-b">primary provider</text>
+    <text x="1044" y="206" class="t-m">used by llm.py, stt.py</text>
+
+    <rect x="1030" y="235" width="250" height="150" rx="8" class="bx-sunk"/>
+    <text x="1044" y="259" class="t-h">Google Gemini</text>
+    <text x="1044" y="281" class="t-b">LLM backup chain</text>
+    <text x="1044" y="297" class="t-b">embeddings for RAG and the cache</text>
+    <text x="1044" y="313" class="t-b">audio STT: Telugu, Kannada, Hinglish</text>
+    <text x="1044" y="329" class="t-b">natural Telugu voice (TTS)</text>
+    <text x="1044" y="351" class="t-m">used by llm, rag, stt, tts</text>
+
+    <rect x="1030" y="400" width="250" height="85" rx="8" class="bx-sunk"/>
+    <text x="1044" y="424" class="t-h">Edge neural voices</text>
+    <text x="1044" y="446" class="t-b">English, Hindi, Kannada, Telugu</text>
+    <text x="1044" y="470" class="t-m">used by tts.py (edge-tts)</text>
+
+    <rect x="1030" y="500" width="250" height="85" rx="8" class="bx-sunk"/>
+    <text x="1044" y="524" class="t-h">Google sign-in</text>
+    <text x="1044" y="546" class="t-b">OAuth 2.0 proves the staff email</text>
+    <text x="1044" y="570" class="t-m">used by layers/rbac.py</text>
+
+    <!-- ===== Storage ===== -->
+    <rect x="258" y="805" width="170" height="110" rx="8" class="bx-sunk"/>
+    <text x="272" y="829" class="t-h">CRM database</text>
+    <text x="272" y="846" class="t-m">data/crm.db · SQLite</text>
+    <text x="272" y="867" class="t-b">leads · calls · appointments</text>
+    <text x="272" y="883" class="t-b">portal tokens</text>
+    <text x="272" y="903" class="t-b">adapter → Fortivex CRM</text>
+
+    <rect x="442" y="805" width="170" height="110" rx="8" class="bx-sunk"/>
+    <text x="456" y="829" class="t-h">Traces + audit</text>
+    <text x="456" y="846" class="t-m">data/observability.db</text>
+    <text x="456" y="867" class="t-b">one trace per turn</text>
+    <text x="456" y="883" class="t-b">append-only audit log</text>
+    <text x="456" y="899" class="t-b">staff users and roles</text>
+
+    <rect x="626" y="805" width="170" height="110" rx="8" class="bx-sunk"/>
+    <text x="640" y="829" class="t-h">Public knowledge</text>
+    <text x="640" y="846" class="t-m">knowledge_base/</text>
+    <text x="640" y="867" class="t-b">services, pricing, FAQ,</text>
+    <text x="640" y="883" class="t-b">objection answers</text>
+    <text x="640" y="899" class="t-b">the agent may say this</text>
+
+    <rect x="810" y="805" width="170" height="110" rx="8" class="bx-sunk"/>
+    <text x="824" y="829" class="t-h">Internal knowledge</text>
+    <text x="824" y="846" class="t-ms">knowledge_internal/</text>
+    <text x="824" y="867" class="t-b">confidential, git-ignored</text>
+    <text x="824" y="883" class="t-b">admin search only, never</text>
+    <text x="824" y="899" class="t-b">in the agent's prompt</text>
+
+    <!-- ===== Wires: customer path ===== -->
+    <path d="M215 165 H256" class="w-call" marker-end="url(#a-call)"/>
+    <path d="M258 195 H217" class="w-call" marker-end="url(#a-call)"/>
+    <path d="M440 180 H463" class="w-call" marker-start="url(#a-call)" marker-end="url(#a-call)"/>
+    <path d="M420 100 V88 H775 V222 H783" class="w-call" marker-end="url(#a-call)"/>
+    <path d="M775 137 H783" class="w-call" marker-end="url(#a-call)"/>
+    <text x="690" y="84" text-anchor="middle" class="t-m">voice in · voice out</text>
+    <path d="M215 555 H256" class="w-call" marker-end="url(#a-call)"/>
+
+    <!-- pipeline to right column -->
+    <path d="M765 300 H783" class="w-call" marker-end="url(#a-call)"/>
+    <path d="M765 405 H783" class="w-call" marker-end="url(#a-call)"/>
+    <path d="M765 480 H783" class="w-call" marker-end="url(#a-call)"/>
+    <path d="M882 557 V573" class="w-call" marker-start="url(#a-call)" marker-end="url(#a-call)"/>
+
+    <!-- ===== Wires: staff path ===== -->
+    <path d="M215 330 H256" class="w-staff" marker-end="url(#a-staff)"/>
+    <path d="M215 447 H256" class="w-staff" marker-end="url(#a-staff)"/>
+    <path d="M215 665 H256" class="w-staff" marker-end="url(#a-staff)"/>
+
+    <!-- ===== Wires: storage ===== -->
+    <path d="M882 735 V770 H343 V803" class="w-store" marker-end="url(#a-store)"/>
+    <path d="M615 735 V770" class="w-store"/>
+    <path d="M465 505 H452 V785 H527 V803" class="w-store" marker-end="url(#a-store)"/>
+    <path d="M711 805 V790 H992 V340 H982" class="w-store" marker-end="url(#a-store)"/>
+    <text x="996" y="660" class="t-b" transform="rotate(-90 996 660)">builds the index</text>
+
+    <!-- ===== Wires: HTTPS egress rail ===== -->
+    <path d="M1005 137 V542" class="w-net"/>
+    <path d="M980 137 H1005 M980 222 H1005 M980 318 H1005 M980 500 H1005" class="w-net-thin"/>
+    <path d="M1005 160 H1028" class="w-net-thin" marker-end="url(#a-net)"/>
+    <path d="M1005 310 H1028" class="w-net-thin" marker-end="url(#a-net)"/>
+    <path d="M1005 442 H1028" class="w-net-thin" marker-end="url(#a-net)"/>
+    <path d="M1005 542 H1028" class="w-net-thin" marker-end="url(#a-net)"/>
+    <text x="1018" y="600" class="t-m" transform="rotate(90 1018 600)" style="fill: var(--warn)">HTTPS · keys from .env</text>
+  </svg>
+  </div>
+
+  <div class="legend">
+    <span><i style="border-color: var(--call)"></i>Customer call path</span>
+    <span><i style="border-color: var(--staff)"></i>Staff path (signed in, role-checked)</span>
+    <span><i style="border-color: var(--store); border-top-style: dashed"></i>Reads and writes to storage</span>
+    <span><i style="border-color: var(--warn); border-top-width: 3px"></i>Calls to cloud APIs</span>
+  </div>
+
+  <div class="grid3">
+    <div class="card">
+      <h3>One gateway per dependency</h3>
+      <p><code>llm.py</code>, <code>stt.py</code>, <code>tts.py</code> and <code>crm.py</code> each hide one outside service. Moving from SQLite to Fortivex CRM, or from Groq to Vertex AI, changes one file.</p>
+    </div>
+    <div class="card">
+      <h3>A fallback at every layer</h3>
+      <p>Groq ⇄ Gemini across five models; embeddings → keyword search; Whisper ⇄ Gemini STT → browser recognizer; Gemini voice → edge-tts → browser voice; all LLMs down → handoff to a human.</p>
+    </div>
+    <div class="card">
+      <h3>The LLM suggests, code decides</h3>
+      <p>Tools validate every argument (a demo slot must really be free), the lead score is a formula, and the output guardrails are code, so a clever prompt cannot talk them out of a rule.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 2 -->
+<section id="workflow">
+  <div class="sec-head">
+    <div class="num">2 · END-TO-END BUSINESS WORKFLOW</div>
+    <h2>A clinic owner calls in and leaves with a booked demo</h2>
+    <p>Ravi runs a dental clinic in Jayanagar and misses calls after 7 pm. He calls Aria at 9 pm. This is the exact path through the code, from his first word to the sales team's dashboard. It is the same script used in the live demo.</p>
+  </div>
+
+  <ol class="flow">
+    <li><div><b>The call starts and Aria checks who is calling.</b><br>A new session is opened. The phone number is looked up in the CRM; a returning caller's last summary is loaded as memory, so Aria can say "welcome back".</div><div class="where">POST /api/call/start → agent.py → crm.db</div></li>
+    <li><div><b>Ravi speaks and the server writes it down.</b> <span class="say">"Hi, I run a dental clinic in Jayanagar. We miss a lot of calls after 7 pm."</span><br>The page records clean 16 kHz audio; Whisper transcribes English and Hindi, Gemini handles Telugu, Kannada and Hinglish, and either one covers for the other.</div><div class="where">call-core.js → POST /api/call/stt → stt.py → Groq / Gemini</div></li>
+    <li><div><b>Input guardrails run first.</b><br>Card, Aadhaar, PAN and OTP numbers are masked before anything is stored or sent to a model; prompt injection and abuse are caught by code.</div><div class="where">POST /api/call/turn → layers/guardrails.py</div></li>
+    <li><div><b>Aria answers from the company's documents.</b> <span class="say">"How much would this cost?"</span><br>RAG finds the pricing section and its source; the router sends this FAQ to the fast model, and a repeat of the same question is served from the cache with no LLM call.</div><div class="where">rag.py → layers/router.py → layers/cache.py → llm.py</div></li>
+    <li><div><b>Objection in Hinglish.</b> <span class="say">"Thoda mehenga lag raha hai, discount milega?"</span><br>The language is detected from what he said, the reply comes back in Hinglish, and the objection-handling notes from the knowledge base are used. No discount is invented: the output guardrail rejects any price not in the facts.</div><div class="where">analysis.py · knowledge_base/04_objections.md</div></li>
+    <li><div><b>Booking with real tools.</b> <span class="say">"Okay, book a demo tomorrow at 3."</span><br>The router picks the strong model. The model calls <code>check_availability</code>, gets the free slots, then <code>book_appointment</code> with <code>"2026-11-27 15:00"</code>. Code checks the slot is really free, saves it, and builds a Google Calendar link.</div><div class="where">pipeline step 6 → tools.py → crm.db (appointments)</div></li>
+    <li><div><b>The reply is checked, spoken and traced.</b><br>The output guardrail allows "your demo is booked" only because the tool really booked it. The reply goes to TTS and back to the page as audio. One trace records every step's time, tokens and cost.</div><div class="where">guardrails.check_output → tts.py → observability.db</div></li>
+    <li><div><b>Scoring happens after he hears the reply.</b><br>A background task updates sentiment and the BANT score (need, budget, authority, timeline). The admin cockpit shows it live; an upset caller raises an alert.</div><div class="where">BackgroundTasks → analysis.py → crm.db → GET /live</div></li>
+    <li><div><b>The call ends and the sales team takes over.</b><br>Aria writes the summary, objections and next steps. The lead, the score and the booked demo appear on the sales dashboard. Ravi gets a private link to his own call summary.</div><div class="where">POST /api/call/end → admin dashboard · my-calls.html</div></li>
+  </ol>
+
+  <div class="outcome"><b>Business result:</b> an after-hours call that would have been missed becomes a qualified lead with a booked demo, a CRM record and a summary for the sales rep, with no staff time spent. A typical turn takes 2-4 seconds with the natural voice.</div>
+</section>
+
+<!-- ============================================================ 3 -->
+<section id="business">
+  <div class="sec-head">
+    <div class="num">3 · PROBLEM, IMPLEMENTATION, COMMERCIAL FEASIBILITY</div>
+    <h2>Why it is worth building, and how it is built</h2>
+  </div>
+  <div class="grid3">
+    <div class="card">
+      <span class="tag">Business problem</span>
+      <h3>Missed calls are lost revenue</h3>
+      <ul>
+        <li>Indian SMBs (clinics, real estate, education, services) miss enquiries after hours, at peak times, or in a language the executive doesn't speak.</li>
+        <li>Calls that are answered get qualified inconsistently and rarely reach a CRM with notes.</li>
+        <li>A human executive covers office hours and one or two languages.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="tag">Technical implementation</span>
+      <h3>Python, built from scratch</h3>
+      <ul>
+        <li>FastAPI backend, vanilla JS front end, no no-code tools.</li>
+        <li>8-layer turn pipeline: guardrails, RAG, router, cache, versioned prompt, LLM with tools, output checks, traces.</li>
+        <li>Groq + Gemini models; Whisper and Gemini for STT; Gemini and edge-tts voices.</li>
+        <li>Google OAuth with five roles; tools also served over MCP.</li>
+        <li>49 offline unit tests; 22 golden conversations scored by code and an LLM judge.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="tag">Commercial feasibility</span>
+      <h3>Cheaper per call than a person</h3>
+      <ul>
+        <li>Cost ≈ ₹10 per 4-minute call; sample Growth plan ₹45,000 for 2,000 calls ≈ ₹22.5 per call → <b>~55% gross margin</b>.</li>
+        <li>A human executive costs the client about ₹30 per call and works office hours only.</li>
+        <li>Fits the Fortivex ecosystem: an add-on for Fortivex CRM, and a vertical for Medivex AI (clinics) and Empowers Academy (admissions).</li>
+      </ul>
+    </div>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th></th><th>Human call executive</th><th>Aria (sample Growth plan)</th></tr></thead>
+      <tbody>
+        <tr><td>Monthly cost to the client</td><td>~₹35-40k (salary, seat, telecom, supervision)</td><td>₹45,000</td></tr>
+        <tr><td>Calls handled</td><td>~1,200, office hours</td><td>2,000, 24x7</td></tr>
+        <tr><td>Cost per call</td><td>~₹30</td><td><b>~₹22.5</b></td></tr>
+        <tr><td>Languages</td><td>1-2</td><td>English, Hindi, Hinglish, Kannada, Telugu</td></tr>
+        <tr><td>Lead score, CRM entry, summary</td><td>Manual</td><td>Automatic, every call</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Prices in the knowledge base and the Growth plan are sample figures for this demo, not official Fortivex AI pricing. Costs are estimates from public list prices.</p>
+</section>
+
+<!-- ============================================================ 4 -->
+<section id="scale">
+  <div class="sec-head">
+    <div class="num">4 · SCALABILITY TO 1,00,000 USERS</div>
+    <h2>What 1 lakh users means in load, and the production design for it</h2>
+    <p>Assumptions: a call lasts 4 minutes with 8 customer turns, and the busiest hour carries 12-15% of the day's calls. Concurrent calls = calls per hour × call minutes ÷ 60.</p>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Scenario</th><th class="num">Calls / month</th><th class="num">Peak calls / hour</th><th class="num">Concurrent at peak</th><th class="num">LLM requests / s</th></tr></thead>
+      <tbody>
+        <tr><td>A · 1 lakh users, about one call each a month</td><td class="num">1,00,000</td><td class="num">~580</td><td class="num"><b>~40</b></td><td class="num">~4</td></tr>
+        <tr><td>B · 1 lakh calls every day (large rollout)</td><td class="num">30,00,000</td><td class="num">~12,000</td><td class="num"><b>~800</b></td><td class="num">~130</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Production topology (India region, Mumbai)</h3>
+  <div class="topo">
+    <div class="tier"><h3>Entry</h3>
+      <div class="chip">Phone network<small>Exotel / Twilio media streams over WebSocket</small></div>
+      <div class="chip">Web and WhatsApp widget</div>
+      <div class="chip">Load balancer + WAF<small>TLS, per-caller rate limits</small></div>
+    </div>
+    <div class="tier"><h3>Stateless services</h3>
+      <div class="chip">Voice gateway pods<small>VAD, barge-in, streaming STT/TTS · autoscaled</small></div>
+      <div class="chip">Agent pods<small>the same pipeline.py · autoscaled</small></div>
+      <div class="chip">Admin + dashboard app<small>SSO, roles</small></div>
+    </div>
+    <div class="tier"><h3>State</h3>
+      <div class="chip">Redis<small>live sessions, answer cache, tokens</small></div>
+      <div class="chip">PostgreSQL + pgvector<small>multi-tenant CRM and RAG</small></div>
+      <div class="chip">Queue → worker pool<small>analysis, summaries, CRM sync</small></div>
+      <div class="chip">Object storage<small>recordings, transcripts</small></div>
+    </div>
+    <div class="tier"><h3>Providers</h3>
+      <div class="chip">LLM pool<small>Vertex AI Gemini + Groq, provisioned throughput</small></div>
+      <div class="chip">Streaming STT and TTS<small>Deepgram / Google / Sarvam · Azure / Google</small></div>
+      <div class="chip">Fortivex CRM, Calendar, WhatsApp API</div>
+    </div>
+  </div>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Part</th><th>MVP today</th><th>Production</th><th>Code that changes</th></tr></thead>
+      <tbody>
+        <tr><td>Call sessions</td><td>Python dict, one server</td><td>Redis with a time limit, so any pod serves any turn</td><td><code>SESSIONS</code> in agent.py</td></tr>
+        <tr><td>CRM</td><td>SQLite</td><td>Managed PostgreSQL with read replicas, <code>tenant_id</code> on every row</td><td>one adapter class in crm.py</td></tr>
+        <tr><td>RAG index</td><td>NumPy in memory</td><td>pgvector with HNSW, one namespace per client</td><td>inside <code>rag.search()</code></td></tr>
+        <tr><td>Voice</td><td>Recorded clip per turn over HTTP</td><td>Phone media streams, streaming STT and TTS</td><td>new gateway service; agent unchanged</td></tr>
+        <tr><td>Analysis</td><td>FastAPI background task</td><td>Queue and a worker pool that scales apart from live calls</td><td>move one function call</td></tr>
+        <tr><td>Answer cache, traces</td><td>Memory, SQLite</td><td>Redis; OpenTelemetry to Grafana</td><td>same get / put interface</td></tr>
+        <tr><td>LLM keys</td><td>Free tiers</td><td>Paid tiers in a key pool; the failover is already in llm.py</td><td>config only</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid2">
+    <div class="card"><h3>Sizing for scenario B</h3><p>Live calls mostly wait on STT, LLM and TTS, so one 2-vCPU pod holds about 80-100 calls. 800 concurrent ÷ 100 = 8 pods; with 50% headroom that is about <b>12 voice-gateway pods</b> and a similar number of agent pods, autoscaled on Kubernetes or Cloud Run by concurrent connections.</p></div>
+    <div class="card"><h3>Targets</h3><p>p95 from "customer stops talking" to "Aria starts talking" under <b>1.2 s</b>, by streaming LLM tokens into TTS one sentence at a time. Availability <b>99.9%</b>. The router and cache already cut LLM spend on FAQ turns.</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ 5 -->
+<section id="security">
+  <div class="sec-head">
+    <div class="num">5 · DATA SECURITY, INFRASTRUCTURE, DEPLOYMENT, COSTS</div>
+    <h2>How data is protected, where it runs, and what it costs</h2>
+  </div>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Area</th><th>Built today</th><th>Added for production</th></tr></thead>
+      <tbody>
+        <tr><td>Staff access</td><td>Google OAuth 2.0 with PKCE; roles admin, manager, sales_rep, viewer; checked on every route and tool; append-only audit log</td><td>Company SSO, tokens in Redis, per-tenant roles</td></tr>
+        <tr><td>Customer access</td><td>The voice agent runs as the <code>customer</code> role: 5 call tools, own lead only; internal fields never leave the server; portal link is a secret per lead, can be reset</td><td>Signed, expiring portal links</td></tr>
+        <tr><td>Sensitive numbers</td><td>Card, Aadhaar, PAN and OTP masked before storage, models or logs</td><td>PII masking in all logs, retention policy (e.g. 90 days)</td></tr>
+        <tr><td>Confidential documents</td><td>Separate internal collection, never in the agent's prompt, admin search only, not served as files</td><td>Per-tenant encrypted buckets</td></tr>
+        <tr><td>AI safety</td><td>Prompt-injection checks, tool allow-list, grounded answers with a threshold, output checks for invented prices and fake bookings</td><td>Red-team test set in CI</td></tr>
+        <tr><td>Application</td><td>Pydantic validation and length limits, parameterised SQL, HTML escaping, upload type/size limits, rate limits, secrets in <code>.env</code></td><td>TLS everywhere, WAF, CSP headers, secrets manager, encryption at rest</td></tr>
+        <tr><td>Compliance (India)</td><td>Data stays on the server you run it on</td><td>DPDP Act 2023 consent and erasure, AI and recording disclosure, TRAI DND rules for outbound, data in India</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <span class="tag">Infrastructure and deployment · today</span>
+      <p>One Docker container (<code>Dockerfile</code> in the repo), secrets passed at run time, never baked into the image. Runs on a laptop, Render, Railway or Cloud Run free tier for about ₹0 a month.</p>
+      <p><code>docker build -t aria .</code><br><code>docker run -p 8000:8000 --env-file .env aria</code></p>
+    </div>
+    <div class="card">
+      <span class="tag">Infrastructure and deployment · production</span>
+      <p>GCP <code>asia-south1</code> (Vertex AI for Gemini) or AWS <code>ap-south-1</code>; containers on GKE or Cloud Run; Terraform for infrastructure; OpenTelemetry, Grafana and LLM tracing with alerts on latency and handoff spikes.</p>
+      <div class="pipe"><span>git push</span><b>→</b><span>49 unit tests</span><b>→</b><span>22 golden evals</span><b>→</b><span>build image</span><b>→</b><span>staging</span><b>→</b><span>canary</span><b>→</b><span>production</span></div>
+    </div>
+  </div>
+
+  <h3>Operating cost per 4-minute call</h3>
+  <div class="costbar" role="img" aria-label="Cost per call: telephony 3.0, STT 2.5, TTS 2.1, LLM 1.7, infrastructure 0.5 rupees">
+    <div style="flex: 3.0; background: #5b6b80">₹3.0</div>
+    <div style="flex: 2.5; background: #0b7a83">₹2.5</div>
+    <div style="flex: 2.1; background: #3f9b6a">₹2.1</div>
+    <div style="flex: 1.7; background: #6a4fb8">₹1.7</div>
+    <div style="flex: 0.5; background: #a86400"></div>
+  </div>
+  <div class="costkey">
+    <span><i style="background:#5b6b80"></i>Telephony ~₹0.75/min</span>
+    <span><i style="background:#0b7a83"></i>Streaming STT</span>
+    <span><i style="background:#3f9b6a"></i>Neural TTS (~1,500 chars)</span>
+    <span><i style="background:#6a4fb8"></i>LLM (~37k in, 3.4k out tokens)</span>
+    <span><i style="background:#a86400"></i>Infra share ₹0.5</span>
+  </div>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Monthly</th><th class="num">Scenario A · 1 lakh calls</th><th class="num">Scenario B · 30 lakh calls</th></tr></thead>
+      <tbody>
+        <tr><td>Variable (≈ ₹10 × calls)</td><td class="num">₹10 lakh</td><td class="num">₹3 crore</td></tr>
+        <tr><td>Fixed infra (cluster, managed DB, Redis, monitoring)</td><td class="num">~₹1.5 lakh</td><td class="num">~₹8-10 lakh</td></tr>
+        <tr class="total"><td>Total</td><td class="num">~₹11.5 lakh (₹11.5 / call)</td><td class="num">~₹3.1 crore (₹10.3 / call)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Ways to bring this to ₹5-6 per call: a lighter model for per-turn analysis, prompt caching of the fixed system prompt, more cached FAQ answers, self-hosted Indic STT/TTS at high volume, and negotiated telephony rates. Estimates use public list prices at ₹88 per USD and must be rechecked before quoting a client.</p>
+</section>
+
+<!-- ============================================================ 6 -->
+<section id="live">
+  <div class="sec-head">
+    <div class="num">6 · LIVE CODING, DEBUGGING, REAL-TIME CHANGES</div>
+    <h2>Where each likely change goes</h2>
+    <p>The code is split so that most changes an interviewer might ask for touch one file and one test. The run-sheet in <code>DEMO_RUNBOOK.md</code> has the commands.</p>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>If asked to…</th><th>Change</th><th>Check with</th></tr></thead>
+      <tbody>
+        <tr><td>Change a price or add a service</td><td>Upload the document in Admin → Knowledge. The cache key includes the knowledge version, so old answers expire on their own</td><td>Ask the price on a call; the source is shown</td></tr>
+        <tr><td>Add a tool, e.g. cancel a demo</td><td><code>tools.py</code> (function + args class + REGISTRY), <code>CALL_TOOLS</code> in <code>layers/rbac.py</code>, a method in <code>crm.py</code></td><td><code>tests/test_api_rbac.py</code></td></tr>
+        <tr><td>Add a language, e.g. Tamil</td><td><code>LANGUAGE_NAMES</code> in <code>agent.py</code>, a voice in <code>VOICES</code> in <code>tts.py</code>, the STT rule in <code>stt.py</code>, the menu in <code>frontend/index.html</code></td><td><code>tests/test_voice.py</code>, a live call</td></tr>
+        <tr><td>Add or tune a guardrail</td><td><code>check_input</code> / <code>check_output</code> in <code>layers/guardrails.py</code></td><td><code>tests/test_layers.py</code>, Quality tab → guard hits</td></tr>
+        <tr><td>Change Aria's behaviour or tone</td><td><code>prompts/aria_system.md</code>; the new version hash shows in every trace</td><td><code>python evals/run.py</code></td></tr>
+        <tr><td>Switch model or provider</td><td><code>.env</code>: <code>LLM_PROVIDER</code>, <code>GROQ_MODEL</code>, <code>GEMINI_MODEL</code>, fast-tier models</td><td>Quality tab: model, tokens, cost per turn</td></tr>
+        <tr><td>Connect a real CRM</td><td>Fill in <code>FortivexCRMAdapter</code> in <code>crm.py</code></td><td>Book a demo; it appears in the CRM</td></tr>
+        <tr><td>Give a teammate access</td><td>Admin → Users (role takes effect at once)</td><td>Audit log entry</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h3>Debugging a bad answer</h3>
+      <ul>
+        <li>Admin → Quality → open the turn's trace: facts used, route, model, prompt version, tools and their results, guard hits, time per step.</li>
+        <li>Server log tags show each fallback: <code>[rag]</code>, <code>[llm]</code>, <code>[stt]</code>, <code>[tts]</code>.</li>
+        <li><code>GET /api/health</code> shows which providers are cooling down after a rate limit.</li>
+        <li>Each module runs alone: <code>python rag.py</code>, <code>python llm.py</code>, <code>python agent.py</code> for a text chat.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Safety net for live changes</h3>
+      <ul>
+        <li><code>python -m unittest discover tests</code>: 49 tests, offline, about 3 seconds.</li>
+        <li><code>python evals/run.py</code>: 22 golden conversations by category (grounding, guardrails, language, router, tools, voice). Last run: 22 of 22.</li>
+        <li><code>uvicorn main:app --reload</code> reloads on every save.</li>
+        <li>If the mic or Wi-Fi fails, <code>python agent.py</code> runs the same agent in the terminal.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>Aria · AI sales voice agent built for the Fortivex AI assignment. Source: the <code>aria-voice-agent</code> repository. More detail in <code>docs/ARCHITECTURE.md</code>, <code>docs/SCALING_SECURITY_COSTS.md</code> and <code>REPORT.md</code>.</footer>
+</div>

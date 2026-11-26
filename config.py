@@ -22,14 +22,18 @@ load_dotenv(BASE_DIR / ".env")
 # --- API keys (secret, never written in code) ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 
-# --- Which LLM to try first ("gemini" or "groq") ---
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").strip().lower()
+# --- Which LLM to try first ("openrouter", "gemini" or "groq"); the others are backups ---
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter").strip().lower()
 
 # --- Model names (comma-separated = backups, tried in order) ---
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite,gemini-3.8-flash,gemini-flash-latest")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b,openai/gpt-oss-120b,openai/gpt-oss-20b")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-3.5-flash-lite,qwen/qwen3.8-27b,openai/gpt-oss-120b")
 GEMINI_EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001")
+# When EVERY model is rate-limited, wait up to this many seconds for one to free up before giving up.
+LLM_MAX_WAIT_S = float(os.getenv("LLM_MAX_WAIT_S", "8"))
 
 # --- Folders ---
 KNOWLEDGE_DIR = BASE_DIR / "knowledge_base"   # documents the agent can read (RAG)
@@ -41,9 +45,10 @@ DATA_DIR.mkdir(exist_ok=True)
 INTERNAL_KNOWLEDGE_DIR = BASE_DIR / "knowledge_internal"
 INTERNAL_KNOWLEDGE_DIR.mkdir(exist_ok=True)
 
-# --- Voice OUT: Gemini TTS for these languages (smoother, more natural accent), edge-tts for the rest ---
-GEMINI_TTS_LANGS = {x.strip() for x in os.getenv("GEMINI_TTS_LANGS", "te").split(",") if x.strip()}
-# Free tier = 3 requests/minute PER MODEL, so several models are rotated (comma-separated, in order).
+# --- Voice OUT: Microsoft edge-tts for every language (instant, free, no limit). Optional: Gemini TTS for
+#     the languages listed here (more natural, but ~9 s per reply and ~10 replies/model/day on a free key) ---
+GEMINI_TTS_LANGS = {x.strip() for x in os.getenv("GEMINI_TTS_LANGS", "").split(",") if x.strip()}
+# Free tier = 3 requests/minute and ~10/day PER MODEL, so several models are rotated (comma-separated).
 GEMINI_TTS_MODELS = os.getenv("GEMINI_TTS_MODELS", "gemini-3.8-flash-lite-tts,gemini-3.8-flash-tts,"
                               "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts")
 GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Sulafat").strip()   # Sulafat = warm; also Aoede, Leda
@@ -51,7 +56,7 @@ GEMINI_TTS_VOICE = os.getenv("GEMINI_TTS_VOICE", "Sulafat").strip()   # Sulafat 
 # --- Voice IN: server speech-to-text. "auto" = Gemini for Telugu/Kannada/Hinglish, Groq Whisper otherwise ---
 STT_PROVIDER = os.getenv("STT_PROVIDER", "auto").strip().lower()
 GROQ_STT_MODEL = os.getenv("GROQ_STT_MODEL", "whisper-large-v3").strip()
-GEMINI_STT_MODEL = os.getenv("GEMINI_STT_MODEL", "gemini-flash-lite-latest,gemini-3.5-flash-lite,gemini-3.5-flash")
+GEMINI_STT_MODEL = os.getenv("GEMINI_STT_MODEL", "gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest,gemini-3.5-flash")
 MAX_AUDIO_MB = 4     # one spoken turn; 16 kHz WAV = ~2 minutes
 
 # --- Admin login on the main page (empty = admin password sign-in disabled) ---
@@ -75,6 +80,8 @@ OBS_DB_PATH = Path(os.getenv("OBS_DB_PATH") or DATA_DIR / "observability.db")   
 ROUTER_ENABLED = _flag("ROUTER_ENABLED", True)
 GROQ_FAST_MODEL = os.getenv("GROQ_FAST_MODEL", "openai/gpt-oss-20b")
 GEMINI_FAST_MODEL = os.getenv("GEMINI_FAST_MODEL", "gemini-3.5-flash-lite")
+OPENROUTER_FAST_MODEL = os.getenv("OPENROUTER_FAST_MODEL", "google/gemini-3.5-flash-lite")
+OPENROUTER_MAX_TOKENS = int(os.getenv("OPENROUTER_MAX_TOKENS", "2000"))   # per reply (includes model reasoning)
 
 # --- Layer: cache. Same FAQ question again -> answer from memory, no LLM call ---
 CACHE_ENABLED = _flag("CACHE_ENABLED", True)

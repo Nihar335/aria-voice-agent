@@ -40,17 +40,48 @@ def detect_language(text: str) -> str:
     return "en"
 
 
+# Common Telugu / Kannada words as they look when written in English letters ("romanised").
+# Speech-to-text sometimes writes Kannada/Telugu this way; the customer still spoke Kannada/Telugu.
+ROMANISED = {
+    "te": set("""nenu naaku naku naa nee meeku miku meru memu mee cheyandi cheyyandi cheyali cheyagalara chestanu
+chesthanu enta entha undi unnayi untundi untadi kavali kaavali kavalante ledu avunu emiti enti emi ela elaa
+ikkada akkada ekkada eppudu enduku evaru repu ivala ippudu chala chaala bagundi manchidi sare saare ayithe kani
+mari inka vaddu kaadu kadu matladali cheppandi cheppu ivvandi vachhe vache taruvata tarvata kuda kooda gurinchi
+avtundi avuthundi gantalaku gantaki""".split()),
+    "kn": set("""nanage nimage naanu neevu nanna nimma beku beda illa ide eshtu estu hege yenu enu yaake yelli
+yaavaga maadi madi maadri naale ivattu swalpa tumba chennagide heli helthini banni baa gottilla aagutte aaytu
+aytu houdu haudu ondu eradu mooru gantege gantige kodi kodu aagbahudu barthini bartini hogi""".split()),
+}
+
+
+def romanised_words(text: str, language: str) -> int:
+    """How many romanised Telugu/Kannada words a Latin-letter text contains."""
+    return len(set(re.findall(r"[a-z]+", text.lower())) & ROMANISED.get(language, set()))
+
+
 def reply_language(text: str, chosen: str | None = None) -> str:
     """
     Which language Aria must answer in, decided by code (not left to the model):
       - Hindi / Kannada / Telugu script, or clear Hinglish -> that language, whatever the menu says
-      - plain English letters -> English, except that a customer who picked Hinglish keeps Hinglish
-        (short Hinglish sentences can look like English to the word list)
+      - plain English letters -> English, except:
+          a customer who picked any other language keeps it ("2 lakh", romanised Telugu/Kannada, a few English
+          words), unless they ask for English. The call never jumps to English on its own.
     """
     detected = detect_language(text)
-    if detected == "en" and chosen == "hinglish":
-        return "hinglish"
+    if chosen and chosen != "en" and detected in ("en", "hinglish") and not asks_for_english(text):
+        # The customer picked Hindi/Hinglish/Kannada/Telugu: a budget, a number, a name or a few English
+        # words typed in English letters ("2 lakh", "AI voice agent") must not switch the call to English.
+        # Only another Indian alphabet, or asking for English, switches it.
+        return "hinglish" if chosen == "hi" and detected == "hinglish" else chosen
     return detected
+
+
+_ASK_ENGLISH = re.compile(r"\b(in|speak|talk|reply|use|switch to|only)\s+english\b|\benglish\s+(please|only|lo|mein|me)\b", re.I)
+
+
+def asks_for_english(text: str) -> bool:
+    """"Speak in English please", "English lo cheppandi", "English mein bolo"."""
+    return bool(_ASK_ENGLISH.search(text or ""))
 
 
 # ---------------------------------------------------------------------------
@@ -118,8 +149,9 @@ def analyze_turn(session) -> dict:
     convo = "\n".join(f"{t['who'].upper()}: {t['text']}" for t in session.transcript[-12:])
     prev = session.analysis or {}
     try:
+        # Background + fast tier: scoring must never wait for, or use up, the limits the live call needs.
         data, result = llm.chat_json(TURN_PROMPT, [{"role": "user", "content": convo}], temperature=0.1,
-                                     prefer="gemini")
+                                     prefer="gemini", tier="fast", background=True)
         data["analysis_ms"] = result.latency_ms
     except Exception as e:
         print(f"[analysis] LLM failed, using keyword sentiment. Reason: {e}")
@@ -152,10 +184,10 @@ def analyze_turn(session) -> dict:
         "language": session.language,
         "sentiment": data.get("sentiment"),
         "score": data["score"],
-        "budget": (bant.get("budget") or {}).get("value"),
-        "authority": (bant.get("authority") or {}).get("value"),
-        "need": (bant.get("need") or {}).get("value"),
-        "timeline": (bant.get("timeline") or {}).get("value"),
+        # Only CLEAR answers go into the CRM: a "partial" guess (e.g. "runs the clinic" -> decision maker?)
+        # must not count as answered, or Aria would skip that booking question (tools.BOOKING_CHECKLIST).
+        **{k: (bant.get(k) or {}).get("value") for k in ("budget", "authority", "need", "timeline")
+           if (bant.get(k) or {}).get("status") == "clear"},
     })
     if not demo_booked and not session.handoff:
         fields["status"] = data["tier"]

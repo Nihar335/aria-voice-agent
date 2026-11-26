@@ -40,62 +40,72 @@ flowchart TB
 ## 1. MVP architecture (what runs today)
 
 ```mermaid
-flowchart LR
-    subgraph Browser["Browser - frontend/index.html"]
-        MIC["🎙️ Mic recording - call-core.js<br/>speech start/end detection<br/>16 kHz WAV per utterance"]
-        UI["Call screen + live chat summary (customer)<br/>+ live cockpit (admin)"]
-        ADM["Admin view (index.html &rarr; Admin)<br/>Google sign-in · sales dashboard ·<br/>knowledge · quality · users"]
-        SPK["🔊 Audio player<br/>(browser voice fallback)"]
+flowchart TB
+    subgraph BROWSER["Browser · frontend/"]
+        MIC["Mic + speaker<br/><small>call-core.js · barge-in</small>"]
+        CALL["Call screen<br/><small>customer summary · admin cockpit</small>"]
+        ADM["Admin tabs<br/><small>knowledge · sales · quality · users</small>"]
     end
 
-    subgraph Server["FastAPI server - main.py"]
-        API["REST API<br/>/api/call/start · stt · turn · live · recap · end<br/>/api/health"]
-        ADMIN["Admin API - admin.py + layers/rbac.py<br/>Google sign-in / break-glass password → token<br/>role checked on every route"]
-        AGENT["Agent brain - agent.py<br/>think → act → observe loop<br/>(max 3 tool steps)"]
-        RAG["RAG - rag.py<br/>section chunks + Gemini embeddings<br/>TF-IDF offline fallback"]
-        TOOLS["Tools - tools.py<br/>save_lead_info · check_availability<br/>book_appointment · handoff_to_human<br/>search_knowledge"]
-        ANALYSIS["Analysis - analysis.py<br/>language · sentiment · BANT score<br/>call summary (background)"]
-        STT["STT - stt.py<br/>Groq Whisper (en/hi)<br/>Gemini (te/kn/Hinglish)"]
-        TTS["TTS - tts.py<br/>Gemini TTS (Telugu)<br/>edge-tts neural voices"]
-        LLM["LLM gateway - llm.py<br/>5-model fallback chain<br/>fail-fast on rate limits<br/>JSON mode + latency"]
-        CRM["CRM adapter - crm.py<br/>SQLiteCRM (today)<br/>FortivexCRMAdapter (plug-in)"]
+    subgraph SERVER["FastAPI server · main.py"]
+        API["Call API<br/><small>start · stt · turn · live · end</small>"]
+        ADMIN["Admin API + RBAC<br/><small>admin.py · layers/rbac.py</small>"]
+        STT["Speech-to-text<br/><small>stt.py</small>"]
+        AGENT["Agent loop<br/><small>agent.py · 7-layer pipeline · max 3 tools</small>"]
+        TTS["Text-to-speech<br/><small>tts.py</small>"]
+        ANA["Analysis<br/><small>analysis.py · BANT · summary</small>"]
+        RAG["RAG<br/><small>rag.py · sources + threshold</small>"]
+        TOOLS["Tools<br/><small>tools.py · booking · handoff</small>"]
+        LLM["LLM gateway<br/><small>llm.py · 5-model fallback</small>"]
     end
 
-    KB[("knowledge_base/ (public)<br/>services · pricing · FAQ · objections")]
-    KBI[("knowledge_internal/ (confidential)<br/>admin-only, never sent to the agent")]
-    DB[("SQLite<br/>leads · calls · appointments")]
-    GEM["Google Gemini API<br/>chat backup · embeddings · STT · TTS"]
-    GROQ["Groq API (primary)<br/>Qwen 3.8 · GPT-OSS 120B/20B · Whisper"]
-    MSV["Microsoft neural voices"]
-    GCAL["Google Calendar<br/>pre-filled event link"]
+    subgraph AI["AI providers"]
+        GROQ["Groq<br/><small>Qwen · GPT-OSS · Whisper</small>"]
+        GEM["Google Gemini<br/><small>LLM · embeddings · STT · TTS</small>"]
+        EDGE["edge-tts<br/><small>neural Indian voices</small>"]
+    end
 
-    MIC -->|WAV audio| API
+    subgraph DATA["Data"]
+        KB[("knowledge_base/<br/><small>public</small>")]
+        CRM[("CRM · SQLite<br/><small>leads · calls · demos</small>")]
+        KBI[("knowledge_internal/<br/><small>admin only</small>")]
+    end
+
+    MIC -->|audio| API
+    CALL -->|turn · live| API
+    ADM -->|token| ADMIN
+
     API --> STT
-    STT --> GROQ
-    STT -.->|fallback| GEM
     API --> AGENT
+    API --> TTS
+    API -.->|after reply| ANA
+
     AGENT --> RAG
-    RAG --> KB
     AGENT --> TOOLS
-    TOOLS --> CRM
-    TOOLS --> GCAL
     AGENT --> LLM
-    ANALYSIS --> LLM
+    ANA --> LLM
+
+    STT --> GROQ
+    STT -.-> GEM
     LLM --> GROQ
     LLM -.->|fallback| GEM
-    RAG -.->|embeddings| GEM
-    API --> TTS
-    TTS --> MSV
+    TTS --> EDGE
     TTS -.->|Telugu| GEM
-    API -->|reply + audio + sources + latency| SPK
-    API --> ANALYSIS
-    ANALYSIS --> CRM
-    CRM --> DB
-    UI -->|poll every 1.2 s| API
-    ADM -->|Bearer token| ADMIN
-    ADMIN -->|upload / delete → re-index| RAG
-    ADMIN -->|leads · calls · demos| CRM
-    RAG -->|admin search only| KBI
+
+    RAG --> KB
+    TOOLS --> CRM
+    ANA --> CRM
+    ADMIN --> CRM
+    ADMIN --> KBI
+
+    classDef browser fill:#E6F4F2,stroke:#0F766E,color:#0B3D38
+    classDef server fill:#EEF3F8,stroke:#1E3A5F,color:#14263D
+    classDef ai fill:#FFF6E0,stroke:#B7791F,color:#4A3008
+    classDef data fill:#F3F0FA,stroke:#5B4B8A,color:#2A2145
+    class MIC,CALL,ADM browser
+    class API,ADMIN,STT,AGENT,TTS,ANA,RAG,TOOLS,LLM server
+    class GROQ,GEM,EDGE ai
+    class KB,KBI,CRM data
 ```
 
 ### Design principles

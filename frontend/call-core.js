@@ -108,7 +108,11 @@ async function sendTurn(text) {
     // If the customer switched language, switch the microphone too. English <-> Hinglish use the same
     // recognizer (en-IN), so the menu stays as the customer set it: the server then answers an English
     // question in English even right after a Hinglish turn.
-    if (SPEECH_CODE[r.language] && SPEECH_CODE[r.language] !== SPEECH_CODE[$("lang").value]) $("lang").value = r.language;
+    // Kannada/Telugu are never switched away to English/Hinglish automatically: the server's speech-to-text
+    // for kn/te also writes English correctly, while one turn written down in English letters used to flip
+    // the menu to Hinglish and break every turn after it. The customer can still change the menu.
+    const keep = ["kn", "te"].includes($("lang").value) && ["en", "hinglish"].includes(r.language);
+    if (!keep && SPEECH_CODE[r.language] && SPEECH_CODE[r.language] !== SPEECH_CODE[$("lang").value]) $("lang").value = r.language;
     busy = false;
     await speak(r);
   } catch (e) {

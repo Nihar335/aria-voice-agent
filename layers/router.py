@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 import config
 from analysis import detect_language
+from tools import still_to_ask
 
 _ACTION = re.compile(
     r"\b(book|booking|demo|slot|schedule|appointment|reschedule|cancel|tomorrow|today|tonight|"
@@ -30,7 +31,7 @@ _QUESTION = re.compile(
     r"\?|\b(what|which|how|why|when|where|do you|can you|is there|does|kya|kitna|kitne|kaise|kaun|kab|kahan)\b", re.I)
 _FOLLOW_UP = re.compile(
     r"\b(this|that|it|these|those|them|iska|iski|iske|yeh|ye|woh|wo|uska|uski|isme|isko|same|also|more)\b", re.I)
-_BOOKING_CONTEXT = re.compile(r"\b(demo|slot|time|name|email|book)\b", re.I)
+_BOOKING_CONTEXT = re.compile(r"\b(demo|slot|time|name|email|book|meeting)\b", re.I)
 
 
 @dataclass
@@ -47,6 +48,12 @@ def route(text: str, session, has_facts: bool, chosen_language: str | None = Non
 
     if not config.ROUTER_ENABLED:
         return Route("action", "strong", False, "router disabled")
+    answered = getattr(session, "answered", None)
+    if answered is not None and not getattr(session, "booked", False) and (
+            still_to_ask(answered) or not getattr(session, "meeting_asked", False) or getattr(session, "urgent", False)):
+        # The call script is still running: every turn must save an answer and ask the next step, so
+        # use the strong model and never a cached FAQ answer (it would skip the script's question).
+        return Route("action", "strong", False, "call script step")
     if _SENSITIVE.search(text):
         return Route("sensitive", "strong", False, "complaint / emotion words")
     if _ACTION.search(text):

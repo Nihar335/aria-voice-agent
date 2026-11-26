@@ -79,6 +79,15 @@ class Session:
         self.abuse_count = 0     # input guardrail: 2nd abusive message -> human handoff
         self.trace_ids = []      # observability: one trace per turn
         self.customer_mode = False   # True = public call page: API answers contain only customer-safe fields
+        # Booking questions Aria has asked AND saved an answer for IN THIS CALL (tools.BOOKING_CHECKLIST).
+        # Demo slots are shown and the demo booked only when all are here. Always empty at the start, also
+        # for returning callers: details stored from earlier calls (some only guesses) must not let Aria
+        # skip the questions and jump straight to booking.
+        self.answered = set()
+        self.asking = {"name"}       # fields Aria's last question asked for (the greeting asks the name)
+        self.offered = set()         # demo slots check_availability gave this call (only these can be booked)
+        self.urgent = False          # customer asked to book ASAP: skip the remaining questions (tools.wants_asap)
+        self.meeting_asked = False   # all questions done and Aria asked "would you like a meeting?"
 
     def memory_text(self) -> str:
         if not self.previous:
@@ -102,9 +111,10 @@ def greeting(session: Session) -> str:
     """First thing the agent says when the call connects."""
     if session.returning:
         name = get_crm().get_lead(session.lead_id).get("name")
-        return f"Hi{' ' + name if name else ''}, welcome back to Fortivex AI! This is Aria. How can I help you today?"
+        return (f"Hi{' ' + name if name else ''}, welcome back to Fortivex AI! This is Aria. "
+                "Just to confirm, may I have your name, please?")
     return ("Hello! This is Aria from Fortivex AI. We help businesses save time and grow with AI. "
-            "You can talk to me in English, Hindi, Hinglish, Kannada or Telugu. How can I help you today?")
+            "You can talk to me in English, Hindi, Hinglish, Kannada or Telugu. May I know your name, please?")
 
 
 def handle_turn(session: Session, user_text: str, chosen_language: str | None = None) -> dict:

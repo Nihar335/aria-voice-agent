@@ -2,7 +2,7 @@
 
 A voice sales agent that talks to customers in **English, Hindi, Hinglish, Kannada and Telugu**, answers only from company documents, qualifies leads, books demos into a CRM, and shows its reasoning live. Built from scratch in Python (no no-code tools).
 
-📄 **[1-page report](REPORT.md)** · 🏗️ **[Architecture + end-to-end workflow](docs/ARCHITECTURE.md)** · 📈 **[Scaling, security, costs](docs/SCALING_SECURITY_COSTS.md)**
+🗺️ **[System architecture page](docs/architecture.html)** (diagram, workflow, business case, scaling, security, costs, live-coding guide; open in a browser) · 📄 **[1-page report](REPORT.md)** · 🏗️ **[Architecture + end-to-end workflow](docs/ARCHITECTURE.md)** · 📈 **[Scaling, security, costs](docs/SCALING_SECURITY_COSTS.md)**
 
 ## Built in 7 layers (how companies build their own AI)
 One API call is not a product. Every customer turn goes through these layers, in order ([layers/pipeline.py](layers/pipeline.py)):
@@ -29,7 +29,7 @@ See it working: admin page → **Quality** tab (traces, eval score, guardrail hi
 ## Features
 | Feature | Where in the code |
 |---|---|
-| 🎙️ Real-time voice: server speech-to-text (Whisper / Gemini), natural voices (Gemini TTS for Telugu, edge-tts), barge-in | `frontend/call-core.js`, `stt.py`, `tts.py` |
+| 🎙️ Real-time voice: server speech-to-text (Whisper / Gemini), Microsoft neural voices (edge-tts; Gemini TTS optional), barge-in | `frontend/call-core.js`, `stt.py`, `tts.py` |
 | 🧠 Memory (in-call + returning caller) & 🌐 multilingual with auto-switching | `agent.py`, `analysis.py` |
 | 🎯 Lead qualification (BANT score 0-100) & 😊 sentiment with escalation alert | `analysis.py` |
 | 📚 RAG with sources and a "no guessing" threshold | `rag.py`, `knowledge_base/` |
@@ -59,7 +59,7 @@ Docker: `docker build -t aria .` then `docker run -p 8000:8000 --env-file .env a
 1. "Hi, I run a dental clinic in Jayanagar. We miss a lot of calls after 7 pm."
 2. "How much would this cost?" (price from the documents, with source)
 3. "Thoda mehenga lag raha hai, discount milega?" (Hinglish + objection)
-4. "Okay, book a demo tomorrow at 3." (availability check + booking + calendar link)
+4. "Okay, book a demo tomorrow at 3." (Aria first asks every booking question: name, business, problem, budget, decision maker, start date, email; then availability check + booking + calendar link. Enforced in `tools.book_appointment`)
 5. "What's the capital of France?" (it will not guess)
 6. End the call → summary. Switch role → Admin → sales dashboard. Call again with the same number → "welcome back".
 
@@ -78,7 +78,7 @@ rag.py           Retrieval: public + internal collections, chunking, embeddings,
 tools.py         Tool registry: JSON schemas, validation, per-role permissions
 crm.py           CRM adapter (SQLite today; Fortivex CRM / Zoho / HubSpot = one class)
 analysis.py      Language detection, sentiment, BANT lead score, call summary
-tts.py           Voices: Gemini TTS (Telugu, smoother accent) and edge-tts, with fallbacks
+tts.py           Voices: Microsoft edge-tts for every language (Gemini TTS optional per language)
 stt.py           Speech-to-text: Groq Whisper (English/Hindi) and Gemini (Telugu/Kannada/Hinglish)
 config.py        Settings from .env
 knowledge_base/  Public company documents the agent answers from (sample pricing)
@@ -120,7 +120,7 @@ Uploads default to **Internal**. The customer view has no admin access: every
 | `GROQ_MODEL`, `GEMINI_MODEL` | Comma-separated model lists, tried in order (each model has its own rate limit) |
 | `GEMINI_EMBED_MODEL` | Embedding model for RAG |
 | `ADMIN_PASSWORD` | Admin password on the main page (empty = password sign-in disabled) |
-| `GEMINI_TTS_LANGS`, `GEMINI_TTS_VOICE` | Languages that use Gemini's natural voice (default `te`) and which voice (default `Sulafat`) |
+| `GEMINI_TTS_LANGS`, `GEMINI_TTS_VOICE` | Optional: languages that use Gemini's voice instead of edge-tts (default none; slower, ~10 replies/model/day free) and which voice |
 | `STT_PROVIDER` | `auto` (Gemini for Telugu/Kannada/Hinglish, Groq Whisper otherwise), `groq` or `gemini` |
 | `MAX_UPLOAD_MB` | Largest file the admin page accepts, in MB (default 50) |
 

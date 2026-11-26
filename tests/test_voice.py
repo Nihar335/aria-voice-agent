@@ -1,4 +1,4 @@
-"""
+r"""
 Offline tests for voice IN (stt.py) and voice OUT (tts.py) routing: no network, providers are stubbed.
     .venv\Scripts\python -m unittest discover tests -v
 """
@@ -54,17 +54,64 @@ class SpeechToText(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             stt.transcribe(b"x", "audio/wav", "en")
 
-    def test_wrong_alphabet_counts_as_a_failure(self):
-        self.stub("gemini", "Namaskaram nenu demo kavali")          # Telugu in English letters
-        self.stub("groq", "ಈ്సેన്అనే")                              # noise as mixed-alphabet gibberish
+    def test_wrong_alphabet(self):
+        # Whisper writing Telugu in English letters (or noise as mixed alphabets) has misheard: rejected.
+        config.STT_PROVIDER = "groq"
+        self.stub("groq", "Meeku repu demo kavali?"); self.stub("gemini", RuntimeError("down"))
         with self.assertRaises(RuntimeError):
             stt.transcribe(b"x", "audio/wav", "te")
-        self.stub("gemini", "నాకు demo కావాలి")
-        self.assertEqual(stt.transcribe(b"x", "audio/wav", "te")["text"], "నాకు demo కావాలి")
+        self.stub("groq", "ಈ്సેన్అనే")
+        with self.assertRaises(RuntimeError):
+            stt.transcribe(b"x", "audio/wav", "te")
+        # Gemini only romanised what it heard correctly: kept, marked, and Aria still answers in Telugu.
+        config.STT_PROVIDER = "auto"
+        self.stub("gemini", ("Meeku repu demo kavali?", "te"))
+        r = stt.transcribe(b"x", "audio/wav", "te")
+        self.assertEqual((r["text"], r["romanised"]), ("Meeku repu demo kavali?", True))
+        self.stub("gemini", ("నాకు demo కావాలి", "te"))
+        self.assertFalse(stt.transcribe(b"x", "audio/wav", "te")["romanised"])
+
+    def test_alphabet_rules(self):
         self.assertTrue(stt.script_ok("price ఎంత?", "te"))
         self.assertTrue(stt.script_ok("How much?", "en"))
-        self.assertTrue(stt.script_ok("Can I book a demo tomorrow at 3?", "te"))   # Telugu picked, English spoken
+        self.assertTrue(stt.script_ok("Can I book a demo tomorrow at 3?", "te"))          # English spoken
+        self.assertTrue(stt.script_ok("Can I book a demo tomorrow at 3?", "te", "en"))
         self.assertFalse(stt.script_ok("Meeku repu demo kavali?", "te"))
+        self.assertFalse(stt.script_ok("City naarle mooru gantige demo book maadi", "kn"))
+        self.assertFalse(stt.script_ok("demo book please", "kn", "kn"))                  # heard Kannada, wrote English
+
+    def test_misheard_words_in_other_alphabets_are_dropped(self):
+        self.assertEqual(stt.drop_foreign_words("シティ ನಾಳೆ ಮೂರು ಗಂಟೆಗೆ demo ಬುಕ್ ಮಾಡಿ"), "ನಾಳೆ ಮೂರು ಗಂಟೆಗೆ demo ಬುಕ್ ಮಾಡಿ")
+        self.assertFalse(stt.gibberish("シティ ನಾಳೆ ಮೂರು ಗಂಟೆಗೆ demo ಬುಕ್ ಮಾಡಿ"))
+        self.assertTrue(stt.gibberish("ಈ്സેન്અને"))
+        self.assertFalse(stt.gibberish("मुझे demo चाहिए, ₹15,000 ok?"))
+
+    def test_gemini_race_prefers_the_right_alphabet(self):
+        import time as _t
+        saved = (stt._gemini_once, config.GEMINI_STT_MODEL, stt._gemini_client)
+        stt._gemini_client = object()          # never used: _gemini_once is stubbed
+        config.GEMINI_STT_MODEL = "fast,slow"
+        stt._model_cooldown.clear()
+
+        def once(model, audio, mime, instruction):
+            if model == "fast":
+                return "naale mooru gantige demo book maadi", "kn"      # quick but romanised
+            _t.sleep(0.2)
+            return "ನಾಳೆ ಮೂರು ಗಂಟೆಗೆ demo book ಮಾಡಿ", "kn"
+        stt._gemini_once = once
+        try:
+            self.assertEqual(stt._gemini(b"x", "audio/wav", "kn")[0], "ನಾಳೆ ಮೂರು ಗಂಟೆಗೆ demo book ಮಾಡಿ")
+
+            def once_fail(model, audio, mime, instruction):
+                if model == "slow":
+                    raise RuntimeError("429 RESOURCE_EXHAUSTED retryDelay': '3600s'")
+                return "naale mooru gantige demo book maadi", "kn"
+            stt._gemini_once = once_fail
+            self.assertEqual(stt._gemini(b"x", "audio/wav", "kn")[0], "naale mooru gantige demo book maadi")
+            self.assertGreater(stt._model_cooldown["slow"] - _t.time(), 3000)   # daily quota respected
+        finally:
+            stt._gemini_once, config.GEMINI_STT_MODEL, stt._gemini_client = saved
+            stt._model_cooldown.clear()
 
     def test_whisper_silence_hallucinations_are_dropped(self):
         self.assertEqual(stt.clean(" Thanks for watching! "), "")

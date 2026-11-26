@@ -142,10 +142,20 @@ class ReplyLanguage(unittest.TestCase):
     def test_answers_in_the_language_the_customer_used(self):
         from analysis import reply_language
         self.assertEqual(reply_language("Thoda mehenga lag raha hai, discount milega?"), "hinglish")
-        # The menu followed a Hindi reply, but the customer asks in English -> English.
-        self.assertEqual(reply_language("Which languages does the voice agent speak?", "hi"), "en")
+        # The customer picked Hindi: English words or numbers typed in English letters don't switch to English...
+        self.assertEqual(reply_language("Which languages does the voice agent speak?", "hi"), "hi")
+        self.assertEqual(reply_language("2 lakh", "te"), "te")
+        self.assertEqual(reply_language("AI voice agent", "kn"), "kn")
+        # ...only asking for English does
+        self.assertEqual(reply_language("Can you speak in English please?", "te"), "en")
+        self.assertEqual(reply_language("English mein bolo", "hinglish"), "en")
+        self.assertEqual(reply_language("Which languages does the voice agent speak?", "en"), "en")
         self.assertEqual(reply_language("डेमो कब हो सकता है?", "en"), "hi")
         self.assertEqual(reply_language("ok, book it", "hinglish"), "hinglish")
+        # Kannada/Telugu picked and the speech was written down in English letters: keep that language
+        self.assertEqual(reply_language("City naarle mooru gantige demo book maadi", "kn"), "kn")
+        self.assertEqual(reply_language("Meeku repu demo kavali?", "te"), "te")
+        self.assertEqual(reply_language("Can I book a demo tomorrow?", "te"), "te")      # picked Telugu stays Telugu
 
 
 class CustomerTranslation(unittest.TestCase):
@@ -193,6 +203,58 @@ class LLMCooldown(unittest.TestCase):
             llm.PROVIDERS, llm.config.GROQ_MODEL, llm.config.LLM_PROVIDER = old
             llm._cooldown.clear()
 
+    def _with_models(self, fake, models="a,b"):
+        import llm
+        old = (llm.PROVIDERS, llm.config.GROQ_MODEL, llm.config.LLM_PROVIDER, llm.time.sleep)
+        slept = []
+        llm.PROVIDERS = {"groq": fake}
+        llm.config.GROQ_MODEL, llm.config.LLM_PROVIDER = models, "groq"
+        llm.time.sleep = slept.append
+        llm._cooldown.clear()
+
+        def restore():
+            llm.PROVIDERS, llm.config.GROQ_MODEL, llm.config.LLM_PROVIDER, llm.time.sleep = old
+            llm._cooldown.clear()
+        self.addCleanup(restore)
+        return llm, slept
+
+    def test_all_rate_limited_waits_then_recovers(self):
+        calls = []
+
+        def fake(model, system, messages, json_mode, temperature):
+            calls.append(model)
+            if len(calls) <= 2:
+                raise RuntimeError("Error code: 429 - Rate limit reached. Please try again in 1.5s.")
+            return "ok", {}
+        llm, slept = self._with_models(fake)
+        self.assertEqual(llm.chat("s", [{"role": "user", "content": "hi"}]).text, "ok")
+        self.assertEqual(len(slept), 1)                 # one short wait instead of failing the turn
+        self.assertLessEqual(slept[0], llm.MAX_WAIT_S)
+
+    def test_rate_limit_vs_real_error(self):
+        def busy(model, *a):
+            raise RuntimeError("Error code: 429 - Rate limit reached for model `x` in organization `org_abc123`. "
+                               "Please try again in 20m0s.")
+        llm, slept = self._with_models(busy)
+        with self.assertRaises(llm.RateLimited) as ctx:
+            llm.chat("s", [{"role": "user", "content": "hi"}])
+        self.assertEqual(slept, [])                      # 20 minutes is too long to wait on a live call
+        self.assertNotIn("org_abc123", str(ctx.exception))
+
+        def broken(model, *a):
+            raise RuntimeError("GROQ_API_KEY is missing in .env")
+        llm, _ = self._with_models(broken)
+        with self.assertRaises(RuntimeError) as ctx:
+            llm.chat("s", [{"role": "user", "content": "hi"}])
+        self.assertNotIsInstance(ctx.exception, llm.RateLimited)
+
+    def test_retry_after_formats(self):
+        import llm
+        self.assertEqual(llm._retry_after(RuntimeError("Please try again in 1m12.5s")), 72.5)
+        self.assertEqual(llm._retry_after(RuntimeError("429 RESOURCE_EXHAUSTED. Please retry in 33.2s.")), 33.2)
+        self.assertEqual(llm._retry_after(RuntimeError("429 {'retryDelay': '41s'}")), 41)
+        self.assertEqual(llm._retry_after(RuntimeError("429 quota")), llm.DEFAULT_COOLDOWN_S)
+
 
 class RBAC(unittest.TestCase):
     def test_roles(self):
@@ -216,6 +278,82 @@ class ToolValidation(unittest.TestCase):
         self.assertIn("error", tools.run_tool(s, "save_lead_info", {"email": "not-an-email"}))
         self.assertIn("not allowed", tools.run_tool(s, "search_internal", {"query": "discount"})["error"])
         self.assertIn("Unknown", tools.run_tool(s, "delete_everything", {})["error"])
+
+    def test_fallback_asks_the_next_question(self):
+        self.assertIn("business", tools.next_question_en({"name"}))
+        self.assertIn("demo slots", tools.next_question_en({f for f, _ in tools.BOOKING_CHECKLIST}))
+        self.assertIn("interested", tools.next_question_en({"name", "company", "authority"}))
+
+    def test_returning_caller_is_asked_again(self):
+        from agent import Session
+        from crm import get_crm
+        lead = get_crm().create_lead("9000044488")
+        get_crm().update_lead(lead["id"], {k: "known" for k, _ in tools.BOOKING_CHECKLIST if k != "email"} | {"email": "a@b.in"})
+        s = Session("9000044488")
+        self.assertTrue(s.returning)
+        self.assertEqual(s.answered, set())
+        self.assertIn("Do NOT offer", tools.booking_checklist_text(s))
+
+    def test_staff_booking_over_mcp_is_not_gated(self):
+        from crm import get_crm
+        s = fake_session(); s.lead_id = get_crm().create_lead("9000044466")["id"]     # no `answered`: MCP context
+        self.assertTrue(tools.run_tool(s, "book_appointment", {"slot": tools.free_slots()[0]})["booked"])
+
+
+class BookingNeedsEveryQuestion(unittest.TestCase):
+    """The meeting is booked only after Aria walked the whole call script (enforced in code)."""
+
+    def test_script_order_and_no_guessed_answers(self):
+        from crm import get_crm
+        lead = get_crm().create_lead("9000044455")
+        s = fake_session(); s.lead_id = lead["id"]; s.answered = set(); s.asking = {"name"}; s.offered = set()
+        slot = tools.free_slots()[0]
+        # Background analysis guesses in the CRM don't count: Aria must ask herself.
+        get_crm().update_lead(lead["id"], {"timeline": "tomorrow at 11 am", "authority": "owner"})
+
+        r = tools.run_tool(s, "book_appointment", {"slot": slot})
+        self.assertFalse(r["booked"])
+        self.assertEqual(len(r["still_to_ask"]), len(tools.CALL_SCRIPT))         # nothing asked yet
+        self.assertIn("still_to_ask", tools.run_tool(s, "check_availability", {}))   # no demo times yet either
+
+        # The 06:55 bug: the model "saved" a budget and timeline nobody said. Only name/business are kept.
+        r = tools.run_tool(s, "save_lead_info", {"name": "Nihar", "company": "Balaji Sarees, saree store",
+                                                  "authority": "owner", "budget": "50,000 to 70,000",
+                                                  "timeline": "tomorrow at 5 PM"})
+        self.assertEqual(r["still_to_ask_before_booking"], ["service", "budget", "timeline"])
+        self.assertIn("not_saved", r)
+        self.assertNotEqual(get_crm().get_lead(lead["id"])["budget"], "50,000 to 70,000")
+        self.assertIn('CURRENT STEP: "service"', tools.booking_checklist_text(s))
+        self.assertIn("AI voice and chat agents", tools.booking_checklist_text(s))
+
+        for step, field, answer in [("service", "need", "voice agent"), ("budget", "budget", "50k"),
+                                    ("timeline", "timeline", "within a month")]:
+            self.assertFalse(tools.run_tool(s, "book_appointment", {"slot": slot})["booked"])
+            s.asking = {field}                                   # Aria asked this step's question
+            tools.run_tool(s, "save_lead_info", {field: answer})
+        self.assertEqual(tools.still_to_ask(s.answered), [])
+        # All answered, but Aria must first ASK whether they want a meeting.
+        self.assertIn("ask ONCE whether", tools.booking_checklist_text(s))
+        self.assertIn("error", tools.run_tool(s, "check_availability", {}))
+        s.meeting_asked = True
+        self.assertFalse(tools.run_tool(s, "book_appointment", {"slot": slot})["booked"])   # slots not offered yet
+        self.assertIn("free_slots", tools.run_tool(s, "check_availability", {}))
+        self.assertTrue(tools.run_tool(s, "book_appointment", {"slot": slot})["booked"])
+        self.assertIn("THE MEETING IS BOOKED", tools.booking_checklist_text(s))
+
+    def test_asap_books_without_the_remaining_questions(self):
+        from crm import get_crm
+        s = fake_session(); s.lead_id = get_crm().create_lead("9000044477")["id"]
+        s.answered = {"name"}; s.asking = {"company", "authority"}; s.offered = set()
+        self.assertIn("error", tools.run_tool(s, "check_availability", {}))
+        self.assertTrue(tools.wants_asap("I'm in a hurry, book the meeting ASAP"))
+        self.assertTrue(tools.wants_asap("jaldi se meeting book karo"))
+        self.assertFalse(tools.wants_asap("can you book me a demo tomorrow?"))    # not in a hurry: questions first
+        self.assertFalse(tools.wants_asap("how fast can you deliver?"))           # urgency without booking
+        s.urgent = True
+        self.assertIn("IN A HURRY", tools.booking_checklist_text(s))
+        slot = tools.run_tool(s, "check_availability", {})["free_slots"][0]
+        self.assertTrue(tools.run_tool(s, "book_appointment", {"slot": slot})["booked"])
 
 
 if __name__ == "__main__":

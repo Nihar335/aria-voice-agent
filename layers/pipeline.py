@@ -15,10 +15,22 @@ from crm import get_crm
 from layers import cache, guardrails, prompts, router
 from layers.observability import Trace
 from rag import format_context, get_kb
-from tools import IST, run_tool, tool_descriptions
+from tools import IST, NEXT_QUESTION_EN, SERVICE_QUESTION_HINGLISH, booking_checklist_text, current_step, next_question_en, run_tool, tool_descriptions, wants_asap
 
 MAX_TOOL_STEPS = 3
 CALLER_ROLE = "customer"      # RBAC: the voice agent acts with the customer's permissions
+HISTORY_MESSAGES = 14         # only the recent conversation goes to the model (free tiers count every token);
+                              # what the customer told us lives in the CRM and the CALL SCRIPT line
+
+
+def recent(history: list) -> list:
+    """The last HISTORY_MESSAGES messages, starting on a customer message (some APIs require that)."""
+    if len(history) <= HISTORY_MESSAGES:
+        return history
+    tail = history[-HISTORY_MESSAGES:]
+    while tail and (tail[0]["role"] != "user" or tail[0]["content"].startswith("[TOOL RESULT")):
+        tail = tail[1:]
+    return tail or history[-1:]
 
 
 def run_turn(session, user_text: str, chosen_language: str | None = None) -> dict:
@@ -132,21 +144,28 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
 
     # ---- [2] system prompt -----------------------------------------------------------
     facts = format_context(hits)
-    system, _ = prompts.render(
-        today=datetime.now(IST).strftime("%A, %d %B %Y, %I:%M %p"),
-        memory=session.memory_text(),
-        tools=tool_descriptions(CALLER_ROLE),
-        context=facts,
-        detected=detect_language(text),
-        chosen=LANGUAGE_NAMES[target_language],
-    )
+    # "Book it ASAP": the only way to book before every question is asked (tools.wants_asap).
+    if hasattr(session, "answered") and wants_asap(text):
+        session.urgent = True
+
+    def render_system():
+        return prompts.render(
+            today=datetime.now(IST).strftime("%A, %d %B %Y, %I:%M %p"),
+            memory=session.memory_text(),
+            checklist=booking_checklist_text(session),
+            tools=tool_descriptions(CALLER_ROLE),
+            context=facts,
+            detected=detect_language(text),
+            chosen=LANGUAGE_NAMES[target_language],
+        )[0]
+    system = render_system()
 
     # ---- [1] LLM  <->  [4] tools (think -> act -> observe) ----------------------------
     llm_ms, provider, thoughts, tier = 0, "", [], r.tier
     tool_outputs, decision, retried, first_customer_en = [], {}, False, None
     for step in range(MAX_TOOL_STEPS + 1):
         with trace.span("llm", step=step, tier=tier):
-            decision, res = llm.chat_json(system, session.history, temperature=0.3, tier=tier)
+            decision, res = llm.chat_json(system, recent(session.history), temperature=0.3, tier=tier)
         trace.llm(res, purpose=f"step {step}", parsed=decision)
         llm_ms += res.latency_ms
         provider = res.provider
@@ -155,7 +174,7 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
             retried, tier = True, "strong"
             trace.guard("output", "empty_reply", "retried on strong model", res.provider)
             with trace.span("llm", step=f"{step} retry", tier=tier):
-                decision, res = llm.chat_json(system, session.history, temperature=0.3, tier=tier)
+                decision, res = llm.chat_json(system, recent(session.history), temperature=0.3, tier=tier)
             trace.llm(res, purpose="empty reply retry", parsed=decision)
             llm_ms += res.latency_ms
             provider = res.provider
@@ -164,6 +183,20 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
             # Only the FIRST step translates what the customer said. After a tool call the last "user"
             # message is the tool result, and models then "translate" that JSON instead.
             first_customer_en = decision.get("customer_en")
+            if isinstance(first_customer_en, str) and session.transcript and session.transcript[-1].get("who") == "customer":
+                # English version of the customer's words: lets save_lead_info check a translated answer
+                # ("AI voice agent" for "ఏఐ వాయిస్ ఏజెంట్") against what they really said.
+                session.transcript[-1]["en"] = clean_customer_en(first_customer_en, text)
+            if hasattr(session, "answered") and not getattr(session, "urgent", False) and wants_asap(first_customer_en):
+                # Urgency said in a language/wording the regex missed, caught in the model's English
+                # translation: re-plan this turn with the ASAP instructions.
+                session.urgent = True
+                system = render_system()
+                with trace.span("llm", step="asap replan", tier="strong"):
+                    decision, res = llm.chat_json(system, recent(session.history), temperature=0.3, tier="strong")
+                trace.llm(res, purpose="asap replan", parsed=decision)
+                llm_ms += res.latency_ms
+                provider = res.provider
         tool = decision.get("tool")
         if tool and step < MAX_TOOL_STEPS:
             args = decision.get("args") or {}
@@ -176,9 +209,25 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
             session.history.append({"role": "assistant", "content": json.dumps(decision, ensure_ascii=False)})
             session.history.append({"role": "user", "content": f"[TOOL RESULT for {tool}] {json.dumps(output, ensure_ascii=False)}"})
             tier = "strong"        # a tool turn is an action turn: use the strong model from here on
+            system = render_system()   # the saved answers moved the call script on: show the model the NEW step
             continue
         break
 
+    if not (decision.get("reply") or "").strip():
+        # Out of tool steps (or the model kept calling tools) with nothing to SAY: ask once more for the
+        # spoken reply, tools off, instead of the confusing "could you say that again?" to a clear answer.
+        nudge = recent(session.history) + [{"role": "user", "content": "[SYSTEM] Do not call any tool now. Write your spoken "
+                                    "reply to the customer's last message, following all the rules."}]
+        with trace.span("llm", step="final reply", tier="strong"):
+            final, res = llm.chat_json(system, nudge, temperature=0.3, tier="strong")
+        trace.llm(res, purpose="final reply (no tools)", parsed=final)
+        llm_ms += res.latency_ms
+        if (final.get("reply") or "").strip():
+            decision = {**final, "tool": None}
+    if not (decision.get("reply") or "").strip() and hasattr(session, "answered") and             (decision.get("language") or session.language) == "en":
+        # Still nothing (every model busy): keep the call moving with the next checklist question.
+        q = next_question_en(session.answered)
+        decision = {**decision, "reply": q, "reply_en": q, "language": "en"}
     reply = decision.get("reply") or "Sorry, could you say that again?"
     language = decision.get("language") or session.language
     reply_en = decision.get("reply_en") or ""
@@ -216,7 +265,7 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
                        f"Write the reply in {LANGUAGE_NAMES[target_language]}. "
                        "Same JSON shape, tool must be null.")}]
             with trace.span("llm", step="regenerate", tier="strong"):
-                decision, res = llm.chat_json(system, session.history + fix, temperature=0.2, tier="strong")
+                decision, res = llm.chat_json(system, recent(session.history) + fix, temperature=0.2, tier="strong")
             trace.llm(res, purpose="guardrail regenerate", parsed=decision)
             llm_ms += res.latency_ms
             provider = res.provider
@@ -227,6 +276,25 @@ def _run(session, user_text: str, chosen_language: str | None, trace: Trace) -> 
             hard = next(rule for rule, _ in v.violations if rule not in guardrails.SOFT_RULES)
             reply = guardrails.SAFE_FALLBACK[hard]
             language, reply_en = "en", reply
+
+    # The prompt made this reply ask the current script step: the customer's NEXT message may answer it
+    # (tools.save_lead_info only accepts service / budget / timeline as the answer to Aria's own question).
+    if hasattr(session, "answered"):
+        step = current_step(session.answered)
+        already_asked = set(getattr(session, "asking", ())) == {"need"}   # only the FIRST service question is fixed
+        if (step and step[0] == "service" and not already_asked and language == "en" and not ("automation" in reply.lower() and "voice" in reply.lower())
+                and not getattr(session, "urgent", False) and not getattr(session, "booked", False)):
+            # The services list is fixed wording: models drop services or invent new ones ("websites").
+            reply = reply_en = NEXT_QUESTION_EN["service"]
+        elif (step and step[0] == "service" and not already_asked and language == "hinglish"
+              and detect_language(reply) != "hinglish" and not getattr(session, "urgent", False)
+              and not getattr(session, "booked", False)):
+            # Hinglish caller: keep the services question in Hinglish instead of plain English.
+            reply, reply_en = SERVICE_QUESTION_HINGLISH, NEXT_QUESTION_EN["service"]
+        session.asking = set(step[1]) if step else set()
+        if step is None and not getattr(session, "urgent", False):
+            # This reply was told to ask "would you like a meeting?": the next answer may book it.
+            session.meeting_asked = True
 
     # ---- [7] cache.put: only clean, tool-free, impersonal FAQ answers -----------------
     name = (get_crm().get_lead(session.lead_id) or {}).get("name") or ""

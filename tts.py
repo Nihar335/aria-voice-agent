@@ -9,7 +9,9 @@ Two engines:
                Slower (~3-4 s) and the free tier allows only a few requests per minute per
                model, so we rotate through several TTS models and fall back to edge-tts.
 
-GEMINI_TTS_LANGS in .env says which languages use Gemini (default: Telugu only).
+Default: edge-tts for every language. GEMINI_TTS_LANGS in .env can switch languages to Gemini (default: none).
+Free tier: about 10 requests PER DAY per TTS model, so on a free key most of a long demo uses edge-tts;
+enable billing on the Gemini key to use the natural voice on every reply.
 If everything fails (no internet), we return no audio and the browser speaks the text
 with its own built-in voice instead. The call never goes silent.
 """
@@ -35,21 +37,24 @@ VOICES = {
 EDGE_RATE = {"en": "+8%", "hinglish": "+8%", "hi": "+5%", "kn": "+0%", "te": "+0%"}
 
 # How Gemini should SAY it (the model follows a short spoken-style direction before the text).
+# "Normal speed" matters: asked for a "relaxed" pace, the model spoke at about half speed.
 GEMINI_STYLE = {
     "te": "Say this in natural, warm, conversational Telugu, like a friendly young woman from Hyderabad "
-          "talking to a customer on a phone call. Relaxed, smooth pace and clear pronunciation; say the "
-          "English words the way Telugu speakers say them",
+          "talking to a customer on a phone call. Normal, brisk speaking speed with smooth flow (not slow, "
+          "no long pauses), clear pronunciation; say the English words the way Telugu speakers say them",
     "kn": "Say this in natural, warm, conversational Kannada, like a friendly young woman from Bengaluru "
-          "talking to a customer on a phone call. Relaxed, smooth pace",
+          "talking to a customer on a phone call. Normal, brisk speaking speed with smooth flow (not slow, "
+          "no long pauses), clear pronunciation; say the English words the way Kannada speakers say them",
     "hi": "Say this in natural, warm, conversational Hindi, like a friendly young woman talking to a "
-          "customer on a phone call. Relaxed, smooth pace",
+          "customer on a phone call. Normal, brisk speaking speed (not slow)",
     "en": "Say this in a warm, friendly Indian-English accent, like a young woman talking to a customer "
-          "on a phone call. Relaxed, smooth pace",
+          "on a phone call. Normal, brisk speaking speed (not slow)",
 }
 GEMINI_STYLE["hinglish"] = GEMINI_STYLE["en"]
 
 _gemini_client = None
 _cooldown: dict[str, float] = {}     # TTS model -> time it may be tried again (after a 429)
+TIMEOUT_MS = 12000                  # one Gemini speech attempt
 
 
 # ---------------------------------------------------------------------------
@@ -63,8 +68,19 @@ def _wav(pcm: bytes, rate: int = 24000) -> bytes:
 
 
 def _retry_seconds(e: Exception) -> float:
+    """
+    How long to skip this model. Google says it in 'retryDelay': seconds for the per-minute limit, hours
+    for the free tier's 10-requests-PER-DAY limit. Honour it, so a used-up model costs no time on later
+    replies (the reply goes straight to the next model or to edge-tts).
+    """
     m = re.search(r"retryDelay'?:\s*'?(\d+)", str(e))
-    return min(max(float(m.group(1)), 5), 600) if m else 60
+    return min(max(float(m.group(1)), 5), 86400) if m else 60
+
+
+def cooling_down() -> dict[str, int]:
+    """TTS models currently skipped (rate limit / daily quota) -> seconds left, for /api/health."""
+    now = time.time()
+    return {m: int(t - now) for m, t in _cooldown.items() if t > now}
 
 
 def _gemini_tts(text: str, language: str) -> tuple[bytes, str]:
@@ -74,7 +90,8 @@ def _gemini_tts(text: str, language: str) -> tuple[bytes, str]:
     from google.genai import types
 
     if _gemini_client is None:
-        _gemini_client = genai.Client(api_key=config.GEMINI_API_KEY)
+        # timeout (ms): a stuck request must fail fast and fall back, never freeze the call
+        _gemini_client = genai.Client(api_key=config.GEMINI_API_KEY, http_options={"timeout": TIMEOUT_MS})
     prompt = f"{GEMINI_STYLE.get(language, GEMINI_STYLE['en'])}:\n{text}"
     speech = types.SpeechConfig(voice_config=types.VoiceConfig(
         prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=config.GEMINI_TTS_VOICE)))

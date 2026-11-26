@@ -140,15 +140,36 @@ async def start_call(body: StartCall, request: Request):
             "previous_date": session.previous["date"][:10] if session.previous else None}
 
 
+# Said when every LLM is briefly rate-limited: the turn is undone and the customer simply repeats it.
+REPEAT_PLEASE = {
+    "en": "Sorry, I missed that for a second. Could you please say that once more?",
+    "hi": "माफ़ कीजिए, मैं एक पल के लिए सुन नहीं पाई। क्या आप एक बार फिर से बता सकते हैं?",
+    "hinglish": "Sorry, ek second ke liye miss ho gaya. Kya aap please ek baar phir se bol sakte hain?",
+    "kn": "ಕ್ಷಮಿಸಿ, ಒಂದು ಕ್ಷಣ ಕೇಳಿಸಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಇನ್ನೊಮ್ಮೆ ಹೇಳುತ್ತೀರಾ?",
+    "te": "క్షమించండి, ఒక్క క్షణం వినిపించలేదు. దయచేసి మళ్ళీ ఒకసారి చెప్పగలరా?",
+}
+
+
 @app.post("/api/call/turn")
 async def call_turn(body: Turn, background: BackgroundTasks):
     session = _get_session(body.session_id)
     if rate_limited(f"turn:{session.id}", config.MAX_TURNS_PER_MINUTE, 60):
         raise HTTPException(429, "You're speaking faster than I can answer. Please wait a moment.")
     t0 = time.perf_counter()
+    before = (len(session.history), len(session.transcript))
     try:
         # handle_turn is normal (blocking) code -> run it in a thread so the server stays responsive.
         result = await run_in_threadpool(handle_turn, session, body.text.strip(), body.language)
+    except llm.RateLimited as e:
+        # Every model is only briefly out of quota (free tier). Temporary, so do NOT hand the lead to a
+        # human: undo this half-finished turn and ask the customer to say it again.
+        print(f"[main] all models rate-limited, asking the customer to repeat: {e}")
+        del session.history[before[0]:]
+        del session.transcript[before[1]:]
+        sorry_en = REPEAT_PLEASE["en"]
+        result = {"reply": REPEAT_PLEASE.get(session.language, sorry_en), "reply_en": sorry_en,
+                  "customer_en": body.text.strip(), "language": session.language, "sources": [], "thoughts": [],
+                  "events": [], "handoff": False, "provider": "none", "latency": {"rag_ms": 0, "llm_ms": 0}}
     except Exception as e:
         print(f"[main] agent error: {e}")
         # Never leave the customer hanging: apologise and flag the lead for a human.
@@ -273,11 +294,12 @@ def dashboard(_: dict = Depends(require("dashboard:read"))):
 def health():
     return {"status": "ok", "llm_provider": config.LLM_PROVIDER,
             "gemini_key": bool(config.GEMINI_API_KEY), "groq_key": bool(config.GROQ_API_KEY),
+            "openrouter_key": bool(config.OPENROUTER_API_KEY),
             "rag_mode": get_kb().mode, "rag_chunks": len(get_kb().chunks),
             "prompt_version": prompts.version(), "router": config.ROUTER_ENABLED,
             "cache": {"enabled": config.CACHE_ENABLED, **cache.stats()},
             "guardrails": config.GUARDRAILS_ENABLED, "google_sign_in": bool(config.GOOGLE_CLIENT_ID),
-            "llm_rate_limited": llm.cooling_down()}
+            "llm_rate_limited": llm.cooling_down(), "tts_rate_limited": tts.cooling_down()}
 
 
 @app.middleware("http")

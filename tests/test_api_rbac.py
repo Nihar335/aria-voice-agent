@@ -191,6 +191,30 @@ class CustomerCallPage(unittest.TestCase):
         self.assertIn("booking", turn)
         self.assertEqual(client.get(f"/api/call/{sid}/live").status_code, 200)
 
+    def test_rate_limit_asks_to_repeat_without_handoff(self):
+        sid = client.post("/api/call/start", json={"phone": "9000088855"}).json()["session_id"]
+        session = main.SESSIONS[sid]
+        before = (len(session.history), len(session.transcript))
+
+        def all_busy(session, text, lang=None):
+            session.history.append({"role": "user", "content": text})        # half-finished turn
+            session.transcript.append({"who": "customer", "text": text})
+            raise main.llm.RateLimited("All LLM providers failed -> groq/x: 429 Rate limit reached")
+
+        main.handle_turn = all_busy
+        turn = client.post("/api/call/turn", json={"session_id": sid, "text": "hello", "natural_voice": False}).json()
+        self.assertFalse(turn["handoff"])
+        self.assertFalse(session.handoff)
+        self.assertIn("once more", turn["reply"])
+        self.assertEqual((len(session.history), len(session.transcript)), before)   # turn undone, no duplicate
+        self.assertNotEqual(main.get_crm().get_lead(session.lead_id).get("status"), "needs_human")
+
+    def test_real_error_still_hands_off(self):
+        sid = client.post("/api/call/start", json={"phone": "9000088844"}).json()["session_id"]
+        main.handle_turn = lambda session, text, lang=None: (_ for _ in ()).throw(RuntimeError("bad key"))
+        turn = client.post("/api/call/turn", json={"session_id": sid, "text": "hello", "natural_voice": False}).json()
+        self.assertTrue(turn["handoff"])
+
     def test_live_recap_has_only_customer_safe_fields(self):
         sid = client.post("/api/call/start", json={"phone": "9000088877", "mode": "customer"}).json()["session_id"]
         main.SESSIONS[sid].analysis = {"recap": "You asked about prices.", "recap_points": ["You run a clinic"],
